@@ -7,8 +7,8 @@ what we own, where it is, who has it, and what needs attention.
 - **Build plan:** [documentation/IT_Asset_Inventory_Build_Plan_Phases.docx](documentation/IT_Asset_Inventory_Build_Plan_Phases.docx)
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
-**Current state:** Phase 1, Slice 1.4: audit log foundation, on top of server-side login and roles
-(no screens yet).
+**Current state:** Phase 1, Slice 1.5: login screen and app shell with a role-based menu, on top
+of server-side login, roles and the audit log. Business pages show "Coming soon".
 
 ---
 
@@ -256,9 +256,26 @@ copy .env.example .env
 npm run dev
 ```
 
-Open <http://localhost:5173>. The start page should show a green box:
-**"Backend: running · Database: reachable"**. A red box means the backend isn't running, or
-CORS isn't allowing `http://localhost:5173` (check `CORS_ORIGINS` in `backend\.env`).
+Open <http://localhost:5173>. You'll see the **Sign in** page. Log in with the Admin from step
+4.7 (or a test account). Each role sees its own menu:
+
+| Role | Menu |
+|---|---|
+| Admin | Dashboard, Assets, Inventory, Vendors, Purchases, Employees, Assignments, Maintenance, Reports, Users, Audit Log |
+| IT Manager | The same, without Users and Audit Log |
+| Employee | My Dashboard, My Assets, My Requests |
+
+Pages not built yet say **Coming soon**. The dashboard shows a green box,
+**"Backend: running · Database: reachable"**. A red box means the backend isn't running, or CORS
+isn't allowing `http://localhost:5173` (check `CORS_ORIGINS` in `backend\.env`).
+
+**Staying logged in:** the login token is kept in the browser tab's *session storage*. Refreshing
+the page keeps you logged in; closing the tab logs you out; each new tab needs its own login.
+Tokens expire after 30 minutes, after which you're sent back to Sign in.
+
+**Component gallery (development only):** <http://localhost:5173/dev/components> lets you try
+the table, badges, form fields, confirm box, messages and date format. It isn't in the menu and
+isn't included in production builds.
 
 ---
 
@@ -318,14 +335,25 @@ is on.
 
 | Path | Purpose |
 |---|---|
-| `index.html`, `src/main.jsx` | Entry point: loads React, the MUI theme and the router. |
+| `index.html`, `src/main.jsx` | Entry point: loads React, the theme, the router, notifications and login state. |
 | `vite.config.js` | Dev server settings (port 5173). |
-| `src/api/` | All calls to the backend (`client.js` = one shared Axios instance). |
-| `src/components/` | Reusable pieces used by many pages. |
-| `src/pages/` | One file per screen. |
-| `src/layouts/` | Page frames (top bar; sidebar comes in Slice 1.5). |
-| `src/routes/` | Which address shows which page. |
-| `src/context/` | Shared app-wide state such as the logged-in user (Slice 1.5). |
+| `src/config.js` | Settings from `frontend/.env`: backend address and company timezone. |
+| `src/api/client.js` | One shared Axios instance: adds the login token to every call; on 401 clears it and returns to Sign in. |
+| `src/api/tokenStorage.js` | Where the token is kept (tab session storage) and why. |
+| `src/api/errors.js` | Turns the backend's error format into a readable sentence. |
+| `src/api/auth.js`, `src/api/health.js` | Calls to the login and health endpoints. |
+| `src/context/AuthContext.jsx` | Who is logged in: `login()`, `logout()`, `user`, `role`; reloads the user on refresh. |
+| `src/context/NotificationContext.jsx` | Pop-up success/error messages: `useNotify().success('Saved')`. |
+| `src/routes/navigation.js` | **One list** of every page, its menu label, icon and allowed roles. Menu and protection both use it. |
+| `src/routes/AppRoutes.jsx`, `RequireAuth.jsx`, `RequireRole.jsx` | Page addresses; "must be logged in"; "must have an allowed role" (else **Not allowed**). |
+| `src/layouts/MainLayout.jsx`, `Sidebar.jsx` | Top bar (name, role, Log out) and the role-based menu (collapses below 900px wide). |
+| `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `dev/ComponentGalleryPage` (development only). |
+| `src/components/DataTable.jsx` | Search box, server-side paging and sorting, loading/empty/error states. |
+| `src/components/FormField.jsx` | Text box with label, required `*` and error message. |
+| `src/components/StatusBadge.jsx` | Coloured asset status: Available, Assigned, Under Maintenance, Damaged, Retired. |
+| `src/components/ConfirmDialog.jsx` | "Are you sure?" box for consequential actions. |
+| `src/components/LoadingState.jsx`, `EmptyState.jsx`, `ErrorMessage.jsx` | Loading spinner, "nothing here yet" and error box with "Try again". |
+| `src/utils/dates.js` | `formatDateTime()` / `formatDate()`: show UTC times in the company timezone. |
 | `src/theme.js` | Shared colours and fonts (MUI theme). |
 
 ---
