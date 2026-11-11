@@ -8,9 +8,10 @@
 """
 
 from collections.abc import Generator
+from datetime import datetime, timezone
 
-from sqlalchemy import MetaData, create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy import DateTime, MetaData, create_engine, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.core.config import get_settings
 
@@ -19,11 +20,14 @@ settings = get_settings()
 # pool_pre_ping checks a connection is still alive before using it.
 # connect_timeout (seconds) stops requests hanging when PostgreSQL is down;
 # without it, a connection attempt on Windows can wait for minutes.
+# options "-c timezone=UTC" makes every database session work in UTC, so
+# timestamps are stored and returned in UTC whatever the server's own setting
+# (decision Q11 / BR-14).
 engine = create_engine(
     settings.database_url,
     echo=settings.sql_echo,
     pool_pre_ping=True,
-    connect_args={"connect_timeout": 5},
+    connect_args={"connect_timeout": 5, "options": "-c timezone=UTC"},
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -41,6 +45,26 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+def utc_now() -> datetime:
+    """The current time in UTC, timezone-aware. Use this, never datetime.now()."""
+    return datetime.now(timezone.utc)
+
+
+class TimestampMixin:
+    """Adds created_at / updated_at to a table.
+
+    Both are "timestamp with time zone" columns (stored in UTC). The database
+    fills created_at; updated_at is refreshed on every update.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=utc_now, nullable=False
+    )
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/ folder (this file is backend/app/core/config.py)
@@ -38,9 +38,21 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # Dates are stored in UTC and displayed in this timezone (decision Q11).
+    # The backend always stores and returns UTC; screens convert for display.
     app_timezone: str = "Asia/Kolkata"
 
     sql_echo: bool = False
+
+    # ---- Login tokens (JWT) ----
+    # Secret used to SIGN tokens. Anyone who knows it can forge a login, so it
+    # must be long, random, different per environment and never committed.
+    jwt_secret_key: str = Field(min_length=32)
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    # Short-lived tokens: after this many minutes the user must log in again.
+    access_token_expire_minutes: int = Field(default=30, ge=1, le=24 * 60)
+
+    # Minimum length for new passwords (seed script now; user management in Slice 1.6).
+    password_min_length: int = Field(default=12, ge=8)
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -58,6 +70,8 @@ class Settings(BaseSettings):
                 raise ValueError("CORS_ORIGINS must not contain localhost in production.")
             if self.sql_echo:
                 raise ValueError("SQL_ECHO must be false in production.")
+            if "change-me" in self.jwt_secret_key:
+                raise ValueError("JWT_SECRET_KEY must be a real random secret in production.")
         return self
 
 

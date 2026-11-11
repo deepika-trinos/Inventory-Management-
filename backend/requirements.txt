@@ -9,3 +9,5 @@ psycopg[binary]==3.3.8      # PostgreSQL driver used by SQLAlchemy
 alembic==1.20.1             # versioned database migrations
 pydantic==2.14.3            # data validation (used by FastAPI)
 pydantic-settings==2.16.2   # reads settings from environment variables / .env
+pwdlib[argon2]==0.3.1       # password hashing with Argon2 (approved in decisions.md)
+PyJWT==2.15.1               # creates and checks JWT login tokens (approved in decisions.md)

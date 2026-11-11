@@ -7,7 +7,7 @@ what we own, where it is, who has it, and what needs attention.
 - **Build plan:** [documentation/IT_Asset_Inventory_Build_Plan_Phases.docx](documentation/IT_Asset_Inventory_Build_Plan_Phases.docx)
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
-**Current state:** Phase 1, Slice 1.2 (project setup). No business features yet.
+**Current state:** Phase 1, Slice 1.3: server-side login and roles (no screens yet).
 
 ---
 
@@ -147,7 +147,16 @@ python -m venv .venv
 copy .env.example .env
 ```
 
-4.4 Options 1 and 2: nothing to edit. Option 3: change `5433` to `5432` in both database lines of `.env`.
+4.4 Edit `backend\.env`:
+
+- Set `JWT_SECRET_KEY` to your own random secret (it signs login tokens). Generate one with:
+
+  ```powershell
+  .venv\Scripts\python -c "import secrets; print(secrets.token_urlsafe(48))"
+  ```
+
+- Database lines: options 1 and 2 need no change. Option 3: change `5433` to `5432` in both
+  database lines.
 
 > `.env` can hold secrets. It is listed in `.gitignore` and must never be committed.
 
@@ -160,8 +169,8 @@ track of which ones have run, so every computer ends up with exactly the same ta
 .venv\Scripts\alembic upgrade head
 ```
 
-Expected: `Running upgrade  -> 0001, Initial empty migration`. This first migration creates no
-tables yet; Alembic only adds its own `alembic_version` table.
+Expected: it runs each migration, for example `Running upgrade 0001 -> 0002, Roles, employees
+(minimal) and users`. Migration 0002 also adds the three roles: Admin, IT Manager, Employee.
 
 Other useful Alembic commands (later slices):
 
@@ -184,7 +193,37 @@ Other useful Alembic commands (later slices):
 
 If PostgreSQL is stopped, `/health` answers with status **503** and `"database":"unreachable"`.
 
-### 4.7 Run the tests
+### 4.7 Create the first Admin account (one time)
+
+In a second PowerShell window, from the `backend` folder:
+
+```powershell
+.venv\Scripts\python -m app.scripts.create_admin
+```
+
+It asks for the Admin's email and a password (at least 12 characters; nothing shows while you
+type). It only stores a secure hash of the password, never the password itself. If an active
+Admin already exists, it does nothing.
+
+**Test accounts for other roles (development only, until user management in Slice 1.6):**
+
+```powershell
+.venv\Scripts\python -m app.scripts.create_user --role Employee
+.venv\Scripts\python -m app.scripts.create_user --role "IT Manager"
+```
+
+### 4.8 Log in on the API docs page
+
+1. Open <http://localhost:8000/docs>.
+2. Open **POST /api/v1/auth/login**, click **Try it out**, enter your email and password, click
+   **Execute**. Copy the `access_token` value (without the quotes).
+3. Click **Authorize** (top right), paste the token, click **Authorize**, then **Close**.
+4. Try **GET /api/v1/auth/me** (your account) and **GET /api/v1/admin/ping**. An Admin gets
+   `pong`; any other role gets **403** `forbidden`.
+
+Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 30). When that happens, log in again.
+
+### 4.9 Run the tests
 
 ```powershell
 .venv\Scripts\python -m pytest
@@ -242,13 +281,20 @@ is on.
 
 | Path | Purpose |
 |---|---|
-| `app/main.py` | Creates the FastAPI app, sets up CORS and plugs in each module's routes. |
+| `app/main.py` | Creates the FastAPI app, sets up CORS and the error format, and plugs in each module's routes under `/api/v1`. |
 | `app/core/config.py` | Reads all settings from environment variables / `.env` (pydantic-settings). |
-| `app/core/database.py` | Database connection, `Base` class for tables, and `get_db` (one session per request). |
-| `app/core/security.py` | Password hashing and JWT tokens (filled in Slice 1.3). |
+| `app/core/database.py` | Database connection (always UTC), `Base` class, `TimestampMixin` (created/updated times) and `get_db` (one session per request). |
+| `app/core/security.py` | Password hashing (Argon2) and JWT token creation/checking. |
+| `app/core/errors.py` | The one error format `{"error": {code, message, details}}` and `AppError`. |
+| `app/core/pagination.py` | Shared paged-list helper: `page`, `page_size`, `sort` in; `{items, total, page, page_size}` out. |
 | `app/models.py` | Imports every module's tables so Alembic can see them. |
 | `app/modules/<module>/` | One folder per feature: `models.py` (tables), `schemas.py` (request/response shapes), `service.py` (business logic), `routes.py` (API endpoints). |
 | `app/modules/health/` | `GET /health` (no table, so no `models.py`). |
+| `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
+| `app/modules/users/` | `roles` and `users` tables, user schemas (never include the password hash), create-user logic. |
+| `app/modules/employees/` | Minimal `employees` table (completed in Slice 2.2). |
+| `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
+| `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts). |
 | `docker/init-test-db.sql` | Creates the `itam_test` database the first time the Docker database starts. |
 | `alembic.ini`, `alembic/` | Migration tool settings; `alembic/env.py` reads `DATABASE_URL`; `alembic/versions/` holds each migration. |
 | `tests/` | Automated tests. `conftest.py` points the app at the test database and runs migrations first. |
@@ -292,3 +338,6 @@ is on.
 | `failed to connect to the docker API` (option 2 only) | Docker Desktop isn't running. Start it and wait until it's ready. |
 | `Port 5173 is in use` | Another `npm run dev` is still running; close it. |
 | `pytest` exits with `TEST_DATABASE_URL is not set` | Add `TEST_DATABASE_URL` to `backend\.env`. |
+| Server won't start: `jwt_secret_key ... Field required` or `at least 32 characters` | Add a `JWT_SECRET_KEY` to `backend\.env` (step 4.4). |
+| `relation "users" does not exist` | Run the migrations: `.venv\Scripts\alembic upgrade head`. |
+| Swagger says `401 invalid_token` | The token expired or was pasted with quotes. Log in again and paste only the token. |

@@ -7,7 +7,8 @@ imported, so every module's models are imported here.
 When a slice adds a new module with tables, add one import line, e.g.:
     from app.modules.users import models as users_models  # noqa: F401
 
-There are no tables yet in Slice 1.2.
 """
 
 from app.core.database import Base  # noqa: F401
+from app.modules.employees import models as employees_models  # noqa: F401
+from app.modules.users import models as users_models  # noqa: F401
