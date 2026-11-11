@@ -43,7 +43,13 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Normal mode: connect to the database and apply the migrations."""
-    connectable = create_engine(get_url(), poolclass=pool.NullPool)
+    # connect_timeout: fail within 5 seconds (instead of hanging) if PostgreSQL is
+    # not running; timezone=UTC: same session setting as the app (decision Q11).
+    connectable = create_engine(
+        get_url(),
+        poolclass=pool.NullPool,
+        connect_args={"connect_timeout": 5, "options": "-c timezone=UTC"},
+    )
     with connectable.connect() as connection:
         context.configure(
             connection=connection,

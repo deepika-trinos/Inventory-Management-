@@ -73,7 +73,8 @@ def db():
     yield session
     session.close()
     with SessionLocal() as cleanup:
-        cleanup.execute(text("TRUNCATE users, employees RESTART IDENTITY CASCADE"))
+        # TRUNCATE is allowed on audit_logs (only UPDATE/DELETE are blocked).
+        cleanup.execute(text("TRUNCATE audit_logs, users, employees RESTART IDENTITY CASCADE"))
         cleanup.commit()
 
 

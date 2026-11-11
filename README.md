@@ -7,7 +7,8 @@ what we own, where it is, who has it, and what needs attention.
 - **Build plan:** [documentation/IT_Asset_Inventory_Build_Plan_Phases.docx](documentation/IT_Asset_Inventory_Build_Plan_Phases.docx)
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
-**Current state:** Phase 1, Slice 1.3: server-side login and roles (no screens yet).
+**Current state:** Phase 1, Slice 1.4: audit log foundation, on top of server-side login and roles
+(no screens yet).
 
 ---
 
@@ -294,6 +295,7 @@ is on.
 | `app/modules/users/` | `roles` and `users` tables, user schemas (never include the password hash), create-user logic. |
 | `app/modules/employees/` | Minimal `employees` table (completed in Slice 2.2). |
 | `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
+| `app/modules/audit/` | Append-only audit log: `models.py` (table), `actions.py` (every action name), `service.py` (`audit.record(...)`: writes in the caller's transaction and strips secrets). |
 | `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts). |
 | `docker/init-test-db.sql` | Creates the `itam_test` database the first time the Docker database starts. |
 | `alembic.ini`, `alembic/` | Migration tool settings; `alembic/env.py` reads `DATABASE_URL`; `alembic/versions/` holds each migration. |

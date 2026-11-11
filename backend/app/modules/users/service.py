@@ -11,6 +11,9 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import hash_password
+from app.modules.audit import service as audit
+from app.modules.audit.actions import AuditAction
+from app.modules.audit.service import AuditContext
 from app.modules.employees.models import Employee
 from app.modules.users.models import Role, User
 
@@ -76,4 +79,41 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    return user
+
+
+def change_role(
+    db: Session,
+    *,
+    actor: User,
+    user: User,
+    new_role_name: str,
+    context: AuditContext | None = None,
+) -> User:
+    """Give a user a different role, and record it in the audit log.
+
+    The role change and its audit row are saved in ONE transaction: both or neither.
+    Slice 1.6 exposes this through an Admin-only endpoint; any extra business
+    rules (for example about the last Admin) must be confirmed before then.
+    """
+    new_role = get_role_by_name(db, new_role_name)
+    if user.role_id == new_role.id:
+        return user  # nothing changed, nothing to record
+
+    before = audit.snapshot(user, ["role"])
+    user.role = new_role
+    try:
+        audit.record(
+            db,
+            actor=actor,
+            action=AuditAction.USER_ROLE_CHANGED,
+            entity=user,
+            before=before,
+            after=audit.snapshot(user, ["role"]),
+            context=context,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()  # undo the role change AND the audit row
+        raise
     return user

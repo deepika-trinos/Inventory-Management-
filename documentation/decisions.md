@@ -74,6 +74,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | psycopg (v3) | Driver that connects SQLAlchemy to PostgreSQL | ✅ Approved | 2026-11-10 | 1.2 |
 | pwdlib + Argon2 | Password hashing (stores a one-way scrambled fingerprint, never the password) | ✅ Approved (passlib + bcrypt **not** chosen) | 2026-11-10 | 1.3 |
 | PyJWT | Creates and checks JWT login tokens | ✅ Approved (python-jose **not** chosen) | 2026-11-10 | 1.3 |
+| httpx (testing only) | Required by FastAPI's test client to call the API inside tests | ✅ Approved with the Slice 1.2 sign-off | 2026-11-10 | 1.2 |
 
 ---
 
@@ -92,8 +93,9 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | Item | What is still undecided | Blocks | Decide by |
 |---|---|---|---|
 | Q12 | Hosting provider and domain | Slice 8.5 | Before Phase 8 starts |
+| R1 | Rules for role changes and deactivation, e.g. may the **last active Admin** be demoted or deactivated? May an Admin change their **own** role? | Slice 1.6 | Before Slice 1.6 starts |
 
-**Nothing OPEN blocks Slice 1.2.**
+**Nothing OPEN blocks Slices 1.2–1.5.**
 
 ---
 
@@ -107,3 +109,16 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 - [x] Owner says **"approved"**. Date: 2026-11-10
 
 **Slice 1.1 is complete. Next: Slice 1.2 (Project setup).**
+
+---
+
+## 7. Decisions made while building (approved with each slice's sign-off)
+
+| # | Decision | Why | Date | Slice |
+|---|---|---|---|---|
+| B1 | **Local development database** is the project's own PostgreSQL server (`scripts\dev-db`, port 5433, data in `.dev-db/`, never committed). Docker (`docker-compose.yml`) kept as an alternative. | The installed PostgreSQL's `postgres` password is unknown; this needs no password, no admin rights, and leaves the existing server untouched. | 2026-11-11 | 1.2 |
+| B2 | **Minimum password length: 12 characters** (setting `PASSWORD_MIN_LENGTH`). | The PRD sets no rule; 12 is a common secure minimum. Can be changed in settings. | 2026-11-11 | 1.3 |
+| B3 | **Deactivated account at login:** after a *correct* password, the user sees "account deactivated" (403). A wrong password always gets the same generic error. | Clear message for real users without revealing which emails exist. | 2026-11-11 | 1.3 |
+| B4 | **`create_user` script** for development-only test accounts (refuses to run in production). | Needed to test IT Manager / Employee roles before user management exists (Slice 1.6). | 2026-11-11 | 1.3 |
+| B5 | **Email check** is a simple format check (something@something.something), emails stored in lower case. | Strict validation would need an extra, unapproved library. | 2026-11-11 | 1.3 |
+| B6 | **Login tokens expire after 30 minutes** (setting `ACCESS_TOKEN_EXPIRE_MINUTES`); logout = the frontend deletes its token. | Short-lived tokens limit damage from a copied token; deactivation takes effect on the next request anyway. | 2026-11-11 | 1.3 |
