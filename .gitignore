@@ -1,0 +1,30 @@
+# ---- Secrets: NEVER commit these ----
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ---- Local development database (scripts\dev-db.ps1): data + dev passwords ----
+.dev-db/
+
+# ---- Python (backend) ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---- Node / React (frontend) ----
+node_modules/
+dist/
+*.local
+
+# ---- Editors and OS ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.log

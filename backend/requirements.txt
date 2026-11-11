@@ -1,0 +1,11 @@
+# Packages the backend needs to RUN (development and production).
+# Install with:  pip install -r requirements.txt
+# Versions are pinned (==) so every machine gets exactly the same code.
+
+fastapi==0.162.2            # web framework: routes, validation, Swagger docs
+uvicorn[standard]==0.54.0   # web server that runs the FastAPI app
+SQLAlchemy==2.1.8           # ORM: talks to the database using Python classes
+psycopg[binary]==3.3.8      # PostgreSQL driver used by SQLAlchemy
+alembic==1.20.1             # versioned database migrations
+pydantic==2.14.3            # data validation (used by FastAPI)
+pydantic-settings==2.16.2   # reads settings from environment variables / .env

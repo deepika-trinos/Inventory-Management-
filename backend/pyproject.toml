@@ -1,0 +1,11 @@
+# Project tool settings. Dependencies are listed in requirements*.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]          # lets tests "import app"
+addopts = "-ra"             # short summary of skipped/failed tests at the end
+filterwarnings = [
+    # Starlette now prefers the "httpx2" package for TestClient. httpx still
+    # works; revisit switching (needs owner approval) before this becomes an error.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

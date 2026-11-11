@@ -1,0 +1,39 @@
+# Local DEVELOPMENT database only: PostgreSQL 18 running in Docker.
+#
+#   Start:            docker compose up -d
+#   Check status:     docker compose ps
+#   Stop (keep data): docker compose down
+#   Reset ALL data:   docker compose down -v
+#
+# The user name and password below are for this local container only. They are
+# never used for production (see backend/.env.production.example).
+
+services:
+  db:
+    image: postgres:18
+    container_name: itam-postgres
+    environment:
+      POSTGRES_USER: itam_app
+      POSTGRES_PASSWORD: itam_dev_password
+      POSTGRES_DB: itam_dev          # main development database
+      TZ: UTC                        # decision Q11: store times in UTC
+      PGTZ: UTC
+    ports:
+      # 127.0.0.1 = reachable only from this computer, not the network.
+      # 5433 on your PC -> 5432 inside the container. (5432 on your PC is
+      # already used by the separately installed PostgreSQL service.)
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # Keeps the data when the container stops or restarts.
+      - itam_pgdata:/var/lib/postgresql
+      # Scripts here run once, the first time the database is created.
+      - ./backend/docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U itam_app -d itam_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  itam_pgdata:

@@ -1,0 +1,6 @@
+# Extra packages needed only while DEVELOPING and TESTING (not on the production server).
+# Install with:  pip install -r requirements-dev.txt   (this also installs requirements.txt)
+
+-r requirements.txt
+pytest==9.2.0               # runs the automated tests
+httpx==0.28.1               # needed by FastAPI's TestClient to call the API inside tests

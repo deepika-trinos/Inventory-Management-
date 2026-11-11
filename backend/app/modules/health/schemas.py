@@ -1,0 +1,10 @@
+"""Response shape for GET /health (shown in the Swagger docs)."""
+
+from typing import Literal
+
+from pydantic import BaseModel
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    database: Literal["reachable", "unreachable"]
