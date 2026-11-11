@@ -7,8 +7,8 @@ what we own, where it is, who has it, and what needs attention.
 - **Build plan:** [documentation/IT_Asset_Inventory_Build_Plan_Phases.docx](documentation/IT_Asset_Inventory_Build_Plan_Phases.docx)
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
-**Current state:** Phase 1, Slice 1.5: login screen and app shell with a role-based menu, on top
-of server-side login, roles and the audit log. Business pages show "Coming soon".
+**Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
+user management. Business pages show "Coming soon" until their phase.
 
 ---
 
@@ -206,12 +206,22 @@ It asks for the Admin's email and a password (at least 12 characters; nothing sh
 type). It only stores a secure hash of the password, never the password itself. If an active
 Admin already exists, it does nothing.
 
-**Test accounts for other roles (development only, until user management in Slice 1.6):**
+**Other users:** log in as the Admin and use **Users → Create user** in the app (section 5).
+
+For quick development test accounts you can also use (refuses to run in production):
 
 ```powershell
 .venv\Scripts\python -m app.scripts.create_user --role Employee
 .venv\Scripts\python -m app.scripts.create_user --role "IT Manager"
 ```
+
+**Check who changed whose role** (audit log):
+
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -h localhost -p 5433 -U itam_app -d itam_dev -f scripts\sql\recent_role_changes.sql
+```
+
+The password is the development database password in `backend\.env` (`itam_dev_password`).
 
 ### 4.8 Log in on the API docs page
 
@@ -309,11 +319,12 @@ is on.
 | `app/modules/<module>/` | One folder per feature: `models.py` (tables), `schemas.py` (request/response shapes), `service.py` (business logic), `routes.py` (API endpoints). |
 | `app/modules/health/` | `GET /health` (no table, so no `models.py`). |
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
-| `app/modules/users/` | `roles` and `users` tables, user schemas (never include the password hash), create-user logic. |
+| `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
 | `app/modules/employees/` | Minimal `employees` table (completed in Slice 2.2). |
 | `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
 | `app/modules/audit/` | Append-only audit log: `models.py` (table), `actions.py` (every action name), `service.py` (`audit.record(...)`: writes in the caller's transaction and strips secrets). |
 | `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts). |
+| `scripts/sql/` | Handy read-only SQL queries, e.g. `recent_role_changes.sql`. |
 | `docker/init-test-db.sql` | Creates the `itam_test` database the first time the Docker database starts. |
 | `alembic.ini`, `alembic/` | Migration tool settings; `alembic/env.py` reads `DATABASE_URL`; `alembic/versions/` holds each migration. |
 | `tests/` | Automated tests. `conftest.py` points the app at the test database and runs migrations first. |
@@ -347,7 +358,8 @@ is on.
 | `src/routes/navigation.js` | **One list** of every page, its menu label, icon and allowed roles. Menu and protection both use it. |
 | `src/routes/AppRoutes.jsx`, `RequireAuth.jsx`, `RequireRole.jsx` | Page addresses; "must be logged in"; "must have an allowed role" (else **Not allowed**). |
 | `src/layouts/MainLayout.jsx`, `Sidebar.jsx` | Top bar (name, role, Log out) and the role-based menu (collapses below 900px wide). |
-| `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `dev/ComponentGalleryPage` (development only). |
+| `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `users/` (Users page, create/edit form); `dev/ComponentGalleryPage` (development only). |
+| `src/api/users.js` | Calls to the Admin-only user endpoints. |
 | `src/components/DataTable.jsx` | Search box, server-side paging and sorting, loading/empty/error states. |
 | `src/components/FormField.jsx` | Text box with label, required `*` and error message. |
 | `src/components/StatusBadge.jsx` | Coloured asset status: Available, Assigned, Under Maintenance, Damaged, Retired. |
@@ -371,3 +383,5 @@ is on.
 | Server won't start: `jwt_secret_key ... Field required` or `at least 32 characters` | Add a `JWT_SECRET_KEY` to `backend\.env` (step 4.4). |
 | `relation "users" does not exist` | Run the migrations: `.venv\Scripts\alembic upgrade head`. |
 | Swagger says `401 invalid_token` | The token expired or was pasted with quotes. Log in again and paste only the token. |
+| Users page: `cannot_change_self` | You can't deactivate yourself or remove your own Admin role. Ask another Admin. |
+| Users page: `last_admin` | Make another user an Admin before demoting or deactivating this one. |

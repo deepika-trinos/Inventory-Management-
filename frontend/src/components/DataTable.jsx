@@ -54,6 +54,7 @@ export default function DataTable({
   emptyMessage,
   pageSizeOptions = [10, 20, 50],
   reloadKey = 0, // change this number to make the table fetch again (e.g. after saving)
+  toolbar = null, // extra controls shown next to the search box (e.g. filters)
 }) {
   const [page, setPage] = useState(0) // MUI counts pages from 0; the server from 1
   const [pageSize, setPageSize] = useState(pageSizeOptions[1] ?? pageSizeOptions[0])
@@ -73,6 +74,11 @@ export default function DataTable({
     }, SEARCH_DELAY_MS)
     return () => clearTimeout(timer)
   }, [searchInput])
+
+  // New filters (a new fetchRows function): start again from page 1.
+  useEffect(() => {
+    setPage(0)
+  }, [fetchRows])
 
   // Ask the server for the current page whenever paging, sorting or search changes.
   useEffect(() => {
@@ -109,26 +115,28 @@ export default function DataTable({
 
   return (
     <Paper variant="outlined">
-      {searchable ? (
-        <Box sx={{ p: 2, pb: 1 }}>
-          <TextField
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder={searchPlaceholder}
-            size="small"
-            fullWidth
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchOutlined fontSize="small" />
-                  </InputAdornment>
-                ),
-              },
-              htmlInput: { 'aria-label': 'Search' },
-            }}
-            sx={{ maxWidth: 360 }}
-          />
+      {searchable || toolbar ? (
+        <Box sx={{ p: 2, pb: 1, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+          {searchable ? (
+            <TextField
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={searchPlaceholder}
+              size="small"
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchOutlined fontSize="small" />
+                    </InputAdornment>
+                  ),
+                },
+                htmlInput: { 'aria-label': 'Search' },
+              }}
+              sx={{ flex: '1 1 240px', maxWidth: 360 }}
+            />
+          ) : null}
+          {toolbar}
         </Box>
       ) : null}
 

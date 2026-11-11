@@ -93,9 +93,11 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | Item | What is still undecided | Blocks | Decide by |
 |---|---|---|---|
 | Q12 | Hosting provider and domain | Slice 8.5 | Before Phase 8 starts |
-| R1 | Rules for role changes and deactivation, e.g. may the **last active Admin** be demoted or deactivated? May an Admin change their **own** role? | Slice 1.6 | Before Slice 1.6 starts |
+| R2 | **Temporary passwords:** must a user change the temporary password at first login? Is a "forgot / reset password" feature needed (the PRD has none)? Today the Admin hands over the password and the user keeps it. | Nothing in Phase 2; affects security review (Slice 8.3) | Before Slice 8.3 |
+| R3 | **Order fix b, Slice 2.2:** when the employee link becomes *required* for Employee-role users, what happens to Employee users created before 2.2 without a link (block their login, or let the Admin link them first)? | Slice 2.2 | Before Slice 2.2 starts |
+| T1 | **Frontend automated tests:** approve a test tool (suggested: Vitest + React Testing Library)? None is approved yet, so the screens are checked manually. | Nothing; recommended before Phase 3 | When convenient |
 
-**Nothing OPEN blocks Slices 1.2–1.5.**
+**R1 is decided (see section 8). Nothing OPEN blocks Slice 2.1. R3 must be answered before Slice 2.2.**
 
 ---
 
@@ -122,3 +124,17 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | B4 | **`create_user` script** for development-only test accounts (refuses to run in production). | Needed to test IT Manager / Employee roles before user management exists (Slice 1.6). | 2026-11-11 | 1.3 |
 | B5 | **Email check** is a simple format check (something@something.something), emails stored in lower case. | Strict validation would need an extra, unapproved library. | 2026-11-11 | 1.3 |
 | B6 | **Login tokens expire after 30 minutes** (setting `ACCESS_TOKEN_EXPIRE_MINUTES`); logout = the frontend deletes its token. | Short-lived tokens limit damage from a copied token; deactivation takes effect on the next request anyway. | 2026-11-11 | 1.3 |
+
+---
+
+## 8. Decisions in Slices 1.5–1.6 (pending the owner's sign-off of those slices)
+
+| # | Decision | Why | Date | Slice |
+|---|---|---|---|---|
+| R1 ✅ | **User-management safety rules** (from the Slice 1.6 brief): an Admin cannot deactivate themselves or remove their own Admin role; the last active Admin cannot be deactivated or demoted; duplicate emails (any case) are blocked. | Prevents locking everyone out of user management. | 2026-11-11 | 1.6 |
+| B7 | **Login token kept in the browser tab's sessionStorage.** Survives refresh; cleared when the tab closes; each new tab logs in separately. A cookie JavaScript cannot read (httpOnly) is the stronger option to consider in Slice 8.3. | Simplest safe choice without backend changes. | 2026-11-11 | 1.5 |
+| B8 | **`@mui/icons-material`** (MUI's own icon set) added, treated as part of the approved MUI. | Menu and button icons. | 2026-11-11 | 1.5 |
+| B9 | **Frontend timezone** set by `VITE_APP_TIMEZONE` (must match the backend's `APP_TIMEZONE`). | Dates shown in company time (Q11). | 2026-11-11 | 1.5 |
+| B10 | **Session re-checked on every page change** (`/auth/me`), so a deactivated user is signed out on their next click and a changed role updates the menu immediately. | Makes "logged out on the next request" true even on pages that call no API yet. | 2026-11-11 | 1.6 |
+| B11 | **Every user change is audited**, including accounts made by the seed scripts (recorded as system actions with no actor). | BR-13: complete history of who created which account. | 2026-11-11 | 1.6 |
+| B12 | **Employee link is API-only for now:** the Users screen has no employee picker until the Employees module exists (Slice 2.2). | No employee list to pick from yet. | 2026-11-11 | 1.6 |

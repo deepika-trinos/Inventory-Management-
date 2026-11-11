@@ -13,6 +13,7 @@ from app.core.errors import register_error_handlers
 from app.modules.admin.routes import router as admin_router
 from app.modules.auth.routes import router as auth_router
 from app.modules.health.routes import router as health_router
+from app.modules.users.routes import router as users_router
 
 settings = get_settings()
 
@@ -37,6 +38,7 @@ app = FastAPI(
     description=DESCRIPTION,
     openapi_tags=[
         {"name": "auth", "description": "Log in, current user, log out."},
+        {"name": "users", "description": "User management (Admin only)."},
         {"name": "admin", "description": "Admin-only endpoints."},
         {"name": "health", "description": "Is the API and database working?"},
     ],
@@ -59,4 +61,5 @@ app.include_router(health_router)
 api_router = APIRouter(prefix=API_PREFIX)
 api_router.include_router(auth_router)
 api_router.include_router(admin_router)
+api_router.include_router(users_router)
 app.include_router(api_router)

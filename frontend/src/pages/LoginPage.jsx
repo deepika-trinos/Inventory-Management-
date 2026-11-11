@@ -85,7 +85,7 @@ export default function LoginPage() {
           </Typography>
         </Stack>
 
-        {sessionExpired ? (
+        {sessionExpired && !submitError ? (
           <Alert severity="info" sx={{ mb: 2 }}>
             Your session has ended. Please sign in again.
           </Alert>

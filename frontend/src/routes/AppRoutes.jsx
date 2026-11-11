@@ -13,6 +13,7 @@ import MainLayout from '../layouts/MainLayout'
 import ComingSoonPage from '../pages/ComingSoonPage'
 import LoginPage from '../pages/LoginPage'
 import NotFoundPage from '../pages/NotFoundPage'
+import UsersPage from '../pages/users/UsersPage'
 import { homePathFor, PAGES } from './navigation'
 import RequireAuth from './RequireAuth'
 import RequireRole from './RequireRole'
@@ -21,6 +22,11 @@ import RequireRole from './RequireRole'
 const ComponentGalleryPage = import.meta.env.DEV
   ? lazy(() => import('../pages/dev/ComponentGalleryPage'))
   : null
+
+// Pages that are built. Every other page in PAGES shows "Coming soon".
+const BUILT_PAGES = {
+  '/users': UsersPage,
+}
 
 function HomeRedirect() {
   const { role } = useAuth()
@@ -36,17 +42,20 @@ export default function AppRoutes() {
         <Route element={<MainLayout />}>
           <Route index element={<HomeRedirect />} />
 
-          {PAGES.map((page) => (
-            <Route
-              key={page.path}
-              path={page.path}
-              element={
-                <RequireRole roles={page.roles}>
-                  <ComingSoonPage page={page} />
-                </RequireRole>
-              }
-            />
-          ))}
+          {PAGES.map((page) => {
+            const Page = BUILT_PAGES[page.path]
+            return (
+              <Route
+                key={page.path}
+                path={page.path}
+                element={
+                  <RequireRole roles={page.roles}>
+                    {Page ? <Page /> : <ComingSoonPage page={page} />}
+                  </RequireRole>
+                }
+              />
+            )
+          })}
 
           {ComponentGalleryPage ? (
             <Route

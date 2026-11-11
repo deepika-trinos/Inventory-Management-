@@ -20,10 +20,18 @@ from app.modules.users.models import User
 from app.modules.users.service import change_role, get_role_by_name
 
 
+SETUP_ACTION = "user.created"  # written by the make_user fixture since Slice 1.6
+
+
 def audit_rows() -> list[AuditLog]:
-    """Read audit rows through a FRESH session: only what was really saved."""
+    """Read audit rows through a FRESH session: only what was really saved.
+    Rows written while creating the test users are left out."""
     with SessionLocal() as fresh:
-        return list(fresh.scalars(select(AuditLog).order_by(AuditLog.id)).all())
+        return list(
+            fresh.scalars(
+                select(AuditLog).where(AuditLog.action != SETUP_ACTION).order_by(AuditLog.id)
+            ).all()
+        )
 
 
 def role_in_database(user_id: int) -> str:
@@ -45,8 +53,9 @@ def test_simulated_role_change_writes_audit_row_with_admin_and_time(db, make_use
     assert row.actor_user_id == admin.id
     assert row.action == "user.role_changed"
     assert (row.entity_type, row.entity_id) == ("users", str(employee.id))
-    assert row.before_data == {"role": "Employee"}
-    assert row.after_data == {"role": "IT Manager"}
+    assert row.before_data["role"] == "Employee"
+    assert row.after_data["role"] == "IT Manager"
+    assert row.after_data["is_active"] is True  # status is shown too
     assert row.created_at.utcoffset() == timedelta(0)  # stored in UTC
     assert started - timedelta(seconds=5) <= row.created_at <= utc_now() + timedelta(seconds=5)
     assert role_in_database(employee.id) == "IT Manager"
@@ -111,7 +120,10 @@ def test_record_joins_the_callers_transaction_and_does_not_commit(db, make_user)
 
     audit.record(db, actor=admin, action=AuditAction.USER_UPDATED, entity=admin, after={"x": 1})
 
-    assert db.scalar(select(func.count()).select_from(AuditLog)) == 1  # visible in this session
+    in_this_session = db.scalar(
+        select(func.count()).select_from(AuditLog).where(AuditLog.action != SETUP_ACTION)
+    )
+    assert in_this_session == 1  # visible in this session
     assert audit_rows() == []  # but not saved yet
     db.commit()
     assert len(audit_rows()) == 1

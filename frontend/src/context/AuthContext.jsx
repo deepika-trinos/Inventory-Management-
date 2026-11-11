@@ -5,7 +5,7 @@
 //   status : 'loading' (checking a saved token) | 'authenticated' | 'anonymous'
 //   user   : the /auth/me answer (email, role, linked employee)
 //   role   : shortcut for user.role.name
-//   login(email, password), logout()
+//   login(email, password), logout(), refreshUser()
 //   sessionExpired : true when the server ended the session (token expired)
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
@@ -67,6 +67,18 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  // Ask the server again who we are (e.g. on every page change). If the user was
+  // deactivated, the server answers 401 and the API client ends the session; if
+  // their role changed, the menu updates straight away.
+  const refreshUser = useCallback(async () => {
+    if (!getToken()) return
+    try {
+      setUser(await fetchCurrentUser())
+    } catch {
+      /* 401 is handled by the session-expired event; other errors: keep going */
+    }
+  }, [])
+
   const logout = useCallback(async () => {
     try {
       await logoutRequest() // tell the server (optional with JWT, see backend docs)
@@ -87,8 +99,9 @@ export function AuthProvider({ children }) {
       sessionExpired,
       login,
       logout,
+      refreshUser,
     }),
-    [user, status, sessionExpired, login, logout],
+    [user, status, sessionExpired, login, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

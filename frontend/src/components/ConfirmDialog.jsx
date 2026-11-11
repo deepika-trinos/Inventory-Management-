@@ -10,6 +10,9 @@
 //     onConfirm={async () => {...}}    // may be async; buttons are disabled while it runs
 //     onCancel={() => setOpen(false)}
 //   />
+//
+// Optional: put extra content inside (e.g. a role picker) as children, and
+// use confirmDisabled to keep the button off until a choice is made.
 import { useState } from 'react'
 import {
   Button,
@@ -28,8 +31,10 @@ export default function ConfirmDialog({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   destructive = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
+  children,
 }) {
   const [busy, setBusy] = useState(false)
 
@@ -45,9 +50,10 @@ export default function ConfirmDialog({
   return (
     <Dialog open={open} onClose={busy ? undefined : onCancel} maxWidth="xs" fullWidth>
       <DialogTitle>{title}</DialogTitle>
-      {message ? (
+      {message || children ? (
         <DialogContent>
-          <DialogContentText>{message}</DialogContentText>
+          {message ? <DialogContentText>{message}</DialogContentText> : null}
+          {children}
         </DialogContent>
       ) : null}
       <DialogActions>
@@ -56,7 +62,7 @@ export default function ConfirmDialog({
         </Button>
         <Button
           onClick={handleConfirm}
-          disabled={busy}
+          disabled={busy || confirmDisabled}
           variant="contained"
           color={destructive ? 'error' : 'primary'}
           startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}
