@@ -29,6 +29,12 @@ class AuditAction:
     CATEGORY_ACTIVATED = "category.activated"  # Slice 2.1
     CATEGORY_DEACTIVATED = "category.deactivated"  # Slice 2.1
 
+    # Vendors (master data)
+    VENDOR_CREATED = "vendor.created"  # Slice 2.3
+    VENDOR_UPDATED = "vendor.updated"  # Slice 2.3
+    VENDOR_ACTIVATED = "vendor.activated"  # Slice 2.3
+    VENDOR_DEACTIVATED = "vendor.deactivated"  # Slice 2.3
+
     # Purchases
     PURCHASE_RECEIVED = "purchase.received"  # Slices 3.2-3.3
     PURCHASE_CANCELLED = "purchase.cancelled"  # Slice 3.1

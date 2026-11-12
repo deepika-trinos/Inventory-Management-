@@ -75,7 +75,7 @@ def db():
     session.close()
     with SessionLocal() as cleanup:
         # TRUNCATE is allowed on audit_logs (only UPDATE/DELETE are blocked).
-        cleanup.execute(text("TRUNCATE audit_logs, asset_categories, users, employees RESTART IDENTITY CASCADE"))
+        cleanup.execute(text("TRUNCATE audit_logs, asset_categories, vendors, users, employees RESTART IDENTITY CASCADE"))
         cleanup.commit()
 
 

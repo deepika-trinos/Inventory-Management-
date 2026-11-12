@@ -96,7 +96,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | R2 | **Temporary passwords:** must a user change the temporary password at first login? Is a "forgot / reset password" feature needed (the PRD has none)? Today the Admin hands over the password and the user keeps it. | Nothing in Phase 2; affects security review (Slice 8.3) | Before Slice 8.3 |
 | T1 | **Frontend automated tests:** approve a test tool (suggested: Vitest + React Testing Library)? None is approved yet, so the screens are checked manually. | Nothing; recommended before Phase 3 | When convenient |
 
-**R1 is decided (see section 8). R3 is decided (see section 10). Nothing OPEN blocks Slice 2.2 or 2.3.**
+**R1 is decided (see section 8). R3 is decided (see section 10). Nothing OPEN blocks Slices 2.3 or 2.4.**
 
 ---
 
@@ -157,7 +157,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 
 ---
 
-## 10. Decisions in Slice 2.2 (pending the owner's sign-off of that slice)
+## 10. Decisions in Slice 2.2 (✅ Slice 2.2 signed off by the owner, 2026-11-12)
 
 | # | Decision | Why | Date | Slice |
 |---|---|---|---|---|
@@ -171,3 +171,15 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | B27 | **Employee search** (EMP-03) matches part of the employee ID, name or department, ignoring case. Indexes on lower(employee ID), lower(name) and lower(department) speed up exact and sorted lookups; "contains" searches still scan the table, which is fine at company size (revisit if employees grow into the tens of thousands). | Simple and needs no extra database extension. | 2026-11-12 | 2.2 |
 | B28 | **Inactive employees can still be edited** and stay readable; repeating activate/deactivate changes nothing and writes no audit row. EMP-05 (no new assignments to inactive employees) is enforced in Phase 5. | Same pattern as categories (B16) and users. | 2026-11-12 | 2.2 (5.1) |
 | B29 | **Dev script `create_user`** needs `--employee-code` for the Employee role. Test fixtures create a linked employee automatically for Employee-role test users. | Order fix b applies to scripts too. | 2026-11-12 | 2.2 |
+
+---
+
+## 11. Decisions in Slice 2.3 (pending the owner's sign-off of that slice)
+
+| # | Decision | Why | Date | Slice |
+|---|---|---|---|---|
+| B30 | **Vendor names are unique ignoring upper/lower case**, active or inactive (`vendor_name_taken`). Spaces at the ends are removed. | Owner's answer, 2026-11-12. Avoids look-alike vendors in the Slice 3.1 purchase picker; same rule as categories (B15). | 2026-11-12 | 2.3 |
+| B31 | **Only the vendor name is required.** Contact person, email, phone and address are optional ("where available", VEN-02). Email is stored in lower case (B5), checked for format, and **may repeat** across vendors. Phone uses the employee phone check (B22). Limits: name and contact person 150, address 500 characters. | Owner's answers, 2026-11-12. | 2026-11-12 | 2.3 |
+| B32 | **Vendor detail page at `/vendors/:id`** with Edit, Activate/Deactivate and a **Purchase history** section that is a placeholder until Slice 3.4 (VEN-04). The vendor name in the list links to it. | Owner's answer, 2026-11-12. Gives Slice 3.4 a page with its own address to fill in. | 2026-11-12 | 2.3 (3.4) |
+| B33 | **Inactive vendors** stay readable and editable; only new purchases are blocked, through `ensure_vendor_active()` (`vendor_inactive`), which Slice 3.1 calls. Repeating activate/deactivate changes nothing and writes no audit row. | BR-12 / VEN-05; same pattern as categories (B13, B16) and employees (B28). | 2026-11-12 | 2.3 (3.1) |
+| B34 | **Vendor search** (VEN-03) matches part of the name, contact person, email or phone, ignoring case; the only filter is status. Audit actions: `vendor.created`, `vendor.updated`, `vendor.activated`, `vendor.deactivated` (before/after of every field). | VEN-03 and BR-13 (B11). | 2026-11-12 | 2.3 |

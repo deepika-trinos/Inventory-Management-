@@ -2,6 +2,7 @@
 //   /login                 : open to everyone
 //   everything else        : must be logged in (RequireAuth)
 //   each page in PAGES     : must also have an allowed role (RequireRole)
+//   DETAIL_PAGES           : pages under a menu page (e.g. /vendors/12), same roles as that page
 //   /                      : sends you to your role's home page
 //   /dev/components        : component gallery, development builds only
 import { lazy, Suspense } from 'react'
@@ -16,6 +17,8 @@ import NotFoundPage from '../pages/NotFoundPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import UsersPage from '../pages/users/UsersPage'
+import VendorDetailPage from '../pages/vendors/VendorDetailPage'
+import VendorsPage from '../pages/vendors/VendorsPage'
 import { homePathFor, PAGES } from './navigation'
 import RequireAuth from './RequireAuth'
 import RequireRole from './RequireRole'
@@ -30,7 +33,11 @@ const BUILT_PAGES = {
   '/categories': CategoriesPage,
   '/employees': EmployeesPage,
   '/users': UsersPage,
+  '/vendors': VendorsPage,
 }
+
+// Detail pages: not in the menu; they use the roles of their menu page (parent).
+const DETAIL_PAGES = [{ path: '/vendors/:vendorId', parent: '/vendors', Page: VendorDetailPage }]
 
 function HomeRedirect() {
   const { role } = useAuth()
@@ -60,6 +67,18 @@ export default function AppRoutes() {
               />
             )
           })}
+
+          {DETAIL_PAGES.map(({ path, parent, Page }) => (
+            <Route
+              key={path}
+              path={path}
+              element={
+                <RequireRole roles={PAGES.find((p) => p.path === parent).roles}>
+                  <Page />
+                </RequireRole>
+              }
+            />
+          ))}
 
           {ComponentGalleryPage ? (
             <Route

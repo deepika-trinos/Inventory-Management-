@@ -8,9 +8,9 @@ what we own, where it is, who has it, and what needs attention.
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
 **Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
-user management. Phase 2 (Master data) in progress: **Slice 2.1 Asset categories** done
-(signed off); **Slice 2.2 Employees** built (pending sign-off), including the rule that every
-Employee-role login is linked to an employee record. Business pages not built yet show
+user management. Phase 2 (Master data) in progress: **Slice 2.1 Asset categories** and
+**Slice 2.2 Employees** done (signed off; every Employee-role login is linked to an employee
+record); **Slice 2.3 Vendors** built (pending sign-off). Business pages not built yet show
 "Coming soon" until their phase.
 
 ---
@@ -177,7 +177,7 @@ Expected: it runs each migration, for example `Running upgrade 0001 -> 0002, Rol
 (minimal) and users`. Migration 0002 also adds the three roles: Admin, IT Manager, Employee.
 Migration 0004 adds the `asset_categories` table (Slice 2.1). Migration 0005 completes the
 `employees` table (department, designation, phone; case-insensitive unique employee ID and work
-email) and keeps existing rows (Slice 2.2).
+email) and keeps existing rows (Slice 2.2). Migration 0006 adds the `vendors` table (Slice 2.3).
 
 Other useful Alembic commands (later slices):
 
@@ -323,11 +323,13 @@ is on.
 | `app/core/database.py` | Database connection (always UTC), `Base` class, `TimestampMixin` (created/updated times) and `get_db` (one session per request). |
 | `app/core/security.py` | Password hashing (Argon2) and JWT token creation/checking. |
 | `app/core/errors.py` | The one error format `{"error": {code, message, details}}` and `AppError`. |
+| `app/core/text.py` | Shared clean-up for typed-in fields: trim text, required text, phone check (B22). Used by employees and vendors. |
 | `app/core/pagination.py` | Shared paged-list helper: `page`, `page_size`, `sort` in; `{items, total, page, page_size}` out. |
 | `app/models.py` | Imports every module's tables so Alembic can see them. |
 | `app/modules/<module>/` | One folder per feature: `models.py` (tables), `schemas.py` (request/response shapes), `service.py` (business logic), `routes.py` (API endpoints). |
 | `app/modules/health/` | `GET /health` (no table, so no `models.py`). |
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
+| `app/modules/vendors/` | Vendors (Slice 2.3): `/api/v1/vendors` for Admin and IT Manager (list with search by name, contact person, email or phone and a status filter; get, create, edit, activate/deactivate). Only the name is required; names are unique ignoring case. Never deleted (BR-12, VEN-05). `ensure_vendor_active()` blocks inactive vendors for new purchases (used from Slice 3.1). Every change audited. |
 | `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
 | `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once items/assets use the category (applies from Slices 2.4 / 3.2). Every change audited. |
 | `app/modules/employees/` | Employees (Slice 2.2): `/api/v1/employees` for Admin and IT Manager (list with search by ID/name/department, filters by status, department and has-login; `/departments` for suggestions; get, create, edit, activate/deactivate). Never deleted (BR-12). Deactivating an employee also deactivates the linked login. Every change audited. |
@@ -371,6 +373,7 @@ is on.
 | `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `users/` (Users page, create/edit form); `dev/ComponentGalleryPage` (development only). |
 | `src/api/users.js` | Calls to the Admin-only user endpoints. |
 | `src/api/categories.js` | Calls to the category endpoints, plus the "One-by-one" / "By quantity" labels. |
+| `src/api/vendors.js`, `src/pages/vendors/` | Vendors page (Admin and IT Manager): list, search, status filter, add/edit dialog, activate/deactivate with a confirm box; vendor detail page `/vendors/:id` with Edit/Deactivate and a **Purchase history** placeholder that Slice 3.4 fills in. |
 | `src/api/employees.js`, `src/pages/employees/` | Employees page (Admin and IT Manager): list, search, department/status filters, add/edit dialog with department suggestions, activate/deactivate with a confirm box that warns when a login will be deactivated too. |
 | `src/components/EmployeePicker.jsx` | Search-as-you-type picker of active employees without a login; used in the Users dialogs (required for the Employee role). |
 | `src/pages/categories/` | Categories page (Admin and IT Manager): list, search, filter, add/edit dialog, activate/deactivate with a confirm box. |
@@ -402,6 +405,8 @@ is on.
 | Categories: `category_name_taken` | A category with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing one. |
 | Categories: `tracking_type_locked` | Items or assets already use this category, so it cannot switch between one-by-one and by quantity (from Slice 2.4 / 3.2 onward). |
 | Categories: there is no Delete | On purpose (BR-12). Deactivate the category instead; it stays visible but cannot be chosen for new records. |
+| Vendors: `vendor_name_taken` | A vendor with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing vendor. |
+| Vendors: there is no Delete | On purpose (BR-12, VEN-05). Deactivate the vendor instead: it stays visible, but new purchases can't use it (from Slice 3.1). |
 | Users: `employee_link_required` | An Employee login must be linked to an employee record. Pick one in the dialog (add the employee on the Employees page first). |
 | Users: `employee_has_login` / `employee_inactive` | That employee already has a login, or is deactivated. Pick another, or activate the employee first. |
 | Users page shows **Needs employee link** | An Employee login created before Slice 2.2 without an employee record (R3). It still works; edit the user and pick the employee. |

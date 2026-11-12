@@ -17,7 +17,6 @@ RULES
   reactivate the login: the Admin does that on the Users page.
 """
 
-import re
 from typing import Any
 
 from sqlalchemy import Select, func, select
@@ -26,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
+from app.core.text import clean_phone, optional_text, required_text
 from app.modules.audit import service as audit
 from app.modules.audit.actions import AuditAction
 from app.modules.audit.service import AuditContext
@@ -47,9 +47,6 @@ _SORTABLE = {
     "updated_at": Employee.updated_at,
 }
 
-# Phone: digits plus the usual separators (decision B22). Format is not checked further.
-_PHONE_RE = re.compile(r"^\+?[0-9 ()./-]{3,30}$")
-
 # Unique indexes (migration 0005) -> the error to show if two saves race each other.
 _UNIQUE_INDEX_ERRORS = {
     "uq_employees_employee_code_lower": ("employee_code_taken", "An employee with this employee ID already exists."),
@@ -58,41 +55,21 @@ _UNIQUE_INDEX_ERRORS = {
 
 
 # ---- Small helpers ------------------------------------------------------------------
-def _required_text(value: str, code: str, message: str) -> str:
-    value = value.strip()
-    if not value:
-        raise AppError(422, code, message)
-    return value
-
-
-def _optional_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return value.strip() or None
-
-
 def _clean_work_email(value: str | None) -> str | None:
-    value = _optional_text(value)
+    value = optional_text(value)
     return users_service.validate_email(value) if value else None
-
-
-def _clean_phone(value: str | None) -> str | None:
-    value = _optional_text(value)
-    if value and not _PHONE_RE.match(value):
-        raise AppError(422, "invalid_phone", "Phone may contain digits, spaces, + ( ) . / and - only.")
-    return value
 
 
 def _clean(field: str, value: Any) -> Any:
     if field == "employee_code":
-        return _required_text(value, "invalid_employee_code", "Please enter an employee ID.")
+        return required_text(value, "invalid_employee_code", "Please enter an employee ID.")
     if field == "full_name":
-        return _required_text(value, "invalid_full_name", "Please enter the employee's name.")
+        return required_text(value, "invalid_full_name", "Please enter the employee's name.")
     if field == "work_email":
         return _clean_work_email(value)
     if field == "phone":
-        return _clean_phone(value)
-    return _optional_text(value)  # department, designation
+        return clean_phone(value)
+    return optional_text(value)  # department, designation
 
 
 def get_employee(db: Session, employee_id: int) -> Employee:
