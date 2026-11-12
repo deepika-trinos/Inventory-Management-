@@ -41,6 +41,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.core.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.modules.employees.models import Employee  # noqa: E402
 from app.modules.users.models import User  # noqa: E402
 from app.modules.users.service import create_user  # noqa: E402
 
@@ -80,16 +81,33 @@ def db():
 
 @pytest.fixture
 def make_user(db) -> Callable[..., tuple[User, str]]:
-    """Create a user and return (user, plain_password). Each gets a random password."""
+    """Create a user and return (user, plain_password). Each gets a random password.
+
+    Since Slice 2.2 an Employee-role user must be linked to an employee record
+    (order fix b), so one is created for it unless employee_id is given.
+    """
     counter = iter(range(1, 10_000))
 
-    def _make(role: str = "Employee", *, is_active: bool = True, email: str | None = None):
+    def _make(
+        role: str = "Employee",
+        *,
+        is_active: bool = True,
+        email: str | None = None,
+        employee_id: int | None = None,
+    ):
+        n = next(counter)
+        if role == "Employee" and employee_id is None:
+            employee = Employee(employee_code=f"TEST-{n:04d}", full_name=f"Test Employee {n}")
+            db.add(employee)
+            db.commit()
+            employee_id = employee.id
         password = secrets.token_urlsafe(16)
         user = create_user(
             db,
-            email=email or f"user{next(counter)}.{role.replace(' ', '').lower()}@example.com",
+            email=email or f"user{n}.{role.replace(' ', '').lower()}@example.com",
             password=password,
             role_name=role,
+            employee_id=employee_id,
             is_active=is_active,
         )
         return user, password

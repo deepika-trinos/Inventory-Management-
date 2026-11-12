@@ -28,10 +28,10 @@ def test_password_is_stored_as_argon2_hash_not_plain_text(make_user):
 def test_same_password_gives_different_hashes(make_user, db):
     first, _ = make_user()
     second = create_user(
-        db, email="second@example.com", password="same-password-123", role_name="Employee"
+        db, email="second@example.com", password="same-password-123", role_name="IT Manager"
     )
     third = create_user(
-        db, email="third@example.com", password="same-password-123", role_name="Employee"
+        db, email="third@example.com", password="same-password-123", role_name="IT Manager"
     )
 
     assert second.password_hash != third.password_hash  # random salt
@@ -45,10 +45,10 @@ def test_email_is_saved_in_lower_case(db):
 
 
 def test_duplicate_email_in_other_case_is_refused_by_service(db):
-    create_user(db, email="dup@example.com", password="long-enough-pw", role_name="Employee")
+    create_user(db, email="dup@example.com", password="long-enough-pw", role_name="IT Manager")
 
     with pytest.raises(AppError) as exc:
-        create_user(db, email="DUP@example.com", password="long-enough-pw", role_name="Employee")
+        create_user(db, email="DUP@example.com", password="long-enough-pw", role_name="IT Manager")
     assert exc.value.code == "email_taken"
 
 

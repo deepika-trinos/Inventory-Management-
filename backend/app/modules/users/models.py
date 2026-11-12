@@ -57,7 +57,7 @@ class User(TimestampMixin, Base):
 
     # lazy="joined": load the role/employee together with the user in one query.
     role: Mapped[Role] = relationship(lazy="joined")
-    employee: Mapped[Employee | None] = relationship(lazy="joined")
+    employee: Mapped[Employee | None] = relationship(lazy="joined", back_populates="user")
 
     def __repr__(self) -> str:
         # Never include password_hash here: this text can end up in logs.

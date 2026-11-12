@@ -13,6 +13,7 @@ from app.core.errors import register_error_handlers
 from app.modules.admin.routes import router as admin_router
 from app.modules.auth.routes import router as auth_router
 from app.modules.categories.routes import router as categories_router
+from app.modules.employees.routes import router as employees_router
 from app.modules.health.routes import router as health_router
 from app.modules.users.routes import router as users_router
 
@@ -41,6 +42,7 @@ app = FastAPI(
         {"name": "auth", "description": "Log in, current user, log out."},
         {"name": "users", "description": "User management (Admin only)."},
         {"name": "categories", "description": "Asset categories (Admin and IT Manager). Never deleted, only deactivated."},
+        {"name": "employees", "description": "Employee records (Admin and IT Manager). Never deleted, only deactivated."},
         {"name": "admin", "description": "Admin-only endpoints."},
         {"name": "health", "description": "Is the API and database working?"},
     ],
@@ -65,4 +67,5 @@ api_router.include_router(auth_router)
 api_router.include_router(admin_router)
 api_router.include_router(users_router)
 api_router.include_router(categories_router)
+api_router.include_router(employees_router)
 app.include_router(api_router)

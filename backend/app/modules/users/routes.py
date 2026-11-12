@@ -56,7 +56,9 @@ def create_user(
 
     - Duplicate email (any upper/lower case): **409** `email_taken`
     - Password too short: **422** `weak_password`
+    - Role Employee without `employee_id`: **422** `employee_link_required`
     - `employee_id` that doesn't exist: **404**; already linked to another user: **409**
+      `employee_has_login`; deactivated employee: **409** `employee_inactive`
     - Writes audit action `user.created`.
     """
     return service.create_user(
@@ -88,8 +90,10 @@ def update_user(
     context: AuditContext = Depends(get_audit_context),
     db: Session = Depends(get_db),
 ) -> User:
-    """Send only the fields to change. `"employee_id": null` removes the link.
-    Writes audit action `user.updated` when something changed."""
+    """Send only the fields to change. `"employee_id": null` removes the link
+    (Employee-role users: **422** `employee_link_required`).
+    Writes `user.updated` when the email changed and `user.employee_link_changed`
+    when the link changed."""
     user = service.get_user(db, user_id)
     changes = body.model_dump(exclude_unset=True)  # only what was actually sent
     return service.update_user(db, actor=admin, user=user, changes=changes, context=context)
@@ -110,12 +114,17 @@ def change_role(
 ) -> User:
     """Change the role. Writes audit action `user.role_changed`.
 
+    - Changing to Employee needs a link: send `employee_id` unless the user is
+      already linked (**422** `employee_link_required`); also writes
+      `user.employee_link_changed` when linked here.
     - You cannot remove your own Admin role: **409** `cannot_change_self`
     - The last active Admin cannot be demoted: **409** `last_admin`
     - The change applies on the user's very next request.
     """
     user = service.get_user(db, user_id)
-    return service.change_role(db, actor=admin, user=user, new_role_name=body.role, context=context)
+    return service.change_role(
+        db, actor=admin, user=user, new_role_name=body.role, employee_id=body.employee_id, context=context
+    )
 
 
 @router.post(

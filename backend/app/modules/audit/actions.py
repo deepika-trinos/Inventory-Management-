@@ -14,7 +14,14 @@ class AuditAction:
     USER_UPDATED = "user.updated"  # Slice 1.6
     USER_ROLE_CHANGED = "user.role_changed"  # Slice 1.4 (service), 1.6 (endpoint)
     USER_ACTIVATED = "user.activated"  # Slice 1.6
-    USER_DEACTIVATED = "user.deactivated"  # Slice 1.6
+    USER_DEACTIVATED = "user.deactivated"  # Slice 1.6 (also when the linked employee is deactivated, Slice 2.2)
+    USER_EMPLOYEE_LINK_CHANGED = "user.employee_link_changed"  # Slice 2.2
+
+    # Employees (master data)
+    EMPLOYEE_CREATED = "employee.created"  # Slice 2.2
+    EMPLOYEE_UPDATED = "employee.updated"  # Slice 2.2
+    EMPLOYEE_ACTIVATED = "employee.activated"  # Slice 2.2
+    EMPLOYEE_DEACTIVATED = "employee.deactivated"  # Slice 2.2
 
     # Asset categories (master data)
     CATEGORY_CREATED = "category.created"  # Slice 2.1

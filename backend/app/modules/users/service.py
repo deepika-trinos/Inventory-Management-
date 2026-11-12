@@ -11,6 +11,16 @@ SAFETY RULES (decisions.md, R1, decided in Slice 1.6):
 - An Admin cannot deactivate themselves or remove their own Admin role.
 - The last active Admin cannot be deactivated or demoted.
 - Email addresses are unique, ignoring upper/lower case.
+
+EMPLOYEE LINK (order fix b + R3, Slice 2.2, decision B25):
+- Every user with the Employee role must be linked to an employee record:
+  enforced on create, on edit (the link cannot be removed) and on a role change
+  to Employee (the request may bring the employee to link).
+- Only an ACTIVE employee without another login can be linked.
+- R3: Employee users created before Slice 2.2 without a link keep logging in;
+  the API marks them needs_employee_link=true until an Admin links them.
+- Every link change on an existing user writes its own audit row
+  (user.employee_link_changed).
 """
 
 import re
@@ -34,7 +44,8 @@ from app.modules.users.models import Role, RoleName, User
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # What the audit log records about a user (never the password hash).
-_AUDIT_FIELDS = ["email", "role", "is_active", "employee_id"]
+AUDIT_FIELDS = ["email", "role", "is_active", "employee_id"]
+_AUDIT_FIELDS = AUDIT_FIELDS  # shared with the employees module
 
 # Fields the user list can be sorted by.
 _SORTABLE = {
@@ -52,7 +63,8 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _validate_email(email: str) -> str:
+def validate_email(email: str) -> str:
+    """Normalise and check an email address (shared with the employees module)."""
     email = normalize_email(email)
     if not _EMAIL_RE.match(email) or len(email) > 255:
         raise AppError(422, "invalid_email", "Please enter a valid email address.")
@@ -91,12 +103,46 @@ def _ensure_email_free(db: Session, email: str, *, except_user_id: int | None = 
         raise AppError(409, "email_taken", "A user with this email already exists.")
 
 
-def _ensure_employee_linkable(db: Session, employee_id: int, *, except_user_id: int | None = None) -> None:
-    if db.get(Employee, employee_id) is None:
+def _ensure_employee_linkable(db: Session, employee_id: int, *, except_user_id: int | None = None) -> Employee:
+    """The employee must exist, be active, and have no other login."""
+    employee = db.get(Employee, employee_id)
+    if employee is None:
         raise AppError(404, "employee_not_found", "Employee record not found.")
     linked = db.scalar(select(User).where(User.employee_id == employee_id))
     if linked is not None and linked.id != except_user_id:
         raise AppError(409, "employee_has_login", "This employee is already linked to another user.")
+    if not employee.is_active:
+        raise AppError(409, "employee_inactive", "This employee is deactivated and cannot be linked to a login.")
+    return employee
+
+
+def _employee_link_required_error() -> AppError:
+    return AppError(
+        422,
+        "employee_link_required",
+        "A user with the Employee role must be linked to an employee record.",
+    )
+
+
+def _link_snapshot(db: Session, employee_id: int | None) -> dict[str, Any]:
+    """Audit data for a link: the employee's id and code (readable even if the code changes later)."""
+    employee = db.get(Employee, employee_id) if employee_id is not None else None
+    return {"employee_id": employee_id, "employee_code": employee.employee_code if employee else None}
+
+
+def _record_link_change(
+    db: Session, *, actor: User | None, user: User, old_employee_id: int | None, context: AuditContext | None
+) -> None:
+    """Audit row for a changed user-to-employee link (written in the caller's transaction)."""
+    audit.record(
+        db,
+        actor=actor,
+        action=AuditAction.USER_EMPLOYEE_LINK_CHANGED,
+        entity=user,
+        before=_link_snapshot(db, old_employee_id),
+        after=_link_snapshot(db, user.employee_id),
+        context=context,
+    )
 
 
 def _other_active_admin_count(db: Session, user: User) -> int:
@@ -109,6 +155,11 @@ def _other_active_admin_count(db: Session, user: User) -> int:
         .with_for_update(of=User)
     ).all()
     return len(ids)
+
+
+def ensure_can_deactivate(db: Session, actor: User | None, user: User) -> None:
+    """The R1 rules for deactivating a login (used here and by the employees module)."""
+    _ensure_not_losing_last_admin(db, actor, user, "deactivate")
 
 
 def _ensure_not_losing_last_admin(db: Session, actor: User | None, user: User, what: str) -> None:
@@ -129,17 +180,32 @@ def _ensure_not_losing_last_admin(db: Session, actor: User | None, user: User, w
         )
 
 
+_NO_LINK_CHANGE = object()
+
+
 def _save(
     db: Session,
     *,
     actor: User | None,
-    action: str,
+    action: str | None,
     user: User,
     before: dict[str, Any] | None,
     context: AuditContext | None,
+    link_changed_from: int | None | object = _NO_LINK_CHANGE,
 ) -> User:
-    """Write the audit row and commit the change together; undo both on any error."""
+    """Write the audit row(s) and commit the change together; undo all on any error.
+
+    link_changed_from: the OLD employee_id when this change also changed the
+    employee link (adds a user.employee_link_changed row); _NO_LINK_CHANGE otherwise.
+    """
     try:
+        if link_changed_from is not _NO_LINK_CHANGE:
+            db.flush()
+            _record_link_change(db, actor=actor, user=user, old_employee_id=link_changed_from, context=context)
+        if action is None:  # only the link changed
+            db.commit()
+            db.refresh(user)
+            return user
         audit.record(
             db,
             actor=actor,
@@ -197,12 +263,14 @@ def create_user(
     The password is hashed; the plain text is never stored or logged.
     `actor` is the Admin doing it, or None for the seed scripts (a system action).
     """
-    email = _validate_email(email)
+    email = validate_email(email)
     validate_new_password(password)
     _ensure_email_free(db, email)
     role = get_role_by_name(db, role_name)
     if employee_id is not None:
         _ensure_employee_linkable(db, employee_id)
+    elif role.name == RoleName.EMPLOYEE:
+        raise _employee_link_required_error()
 
     user = User(
         email=email,
@@ -223,30 +291,45 @@ def update_user(
     changes: dict[str, Any],
     context: AuditContext | None = None,
 ) -> User:
-    """Change email and/or employee link (audit: user.updated).
+    """Change email (audit: user.updated) and/or the employee link (audit:
+    user.employee_link_changed). Everything is saved together.
 
     `changes` holds only the fields the Admin actually sent. employee_id=None
-    removes the link. Role and active status have their own actions below.
+    removes the link, except for Employee-role users (order fix b).
+    Role and active status have their own actions below.
     """
     before = audit.snapshot(user, _AUDIT_FIELDS)
-    changed = False
+    email_changed = False
+    old_employee_id = user.employee_id
 
     if "email" in changes and changes["email"] is not None:
-        email = _validate_email(changes["email"])
+        email = validate_email(changes["email"])
         if email != user.email:
             _ensure_email_free(db, email, except_user_id=user.id)
-            user.email = email
-            changed = True
+            email_changed = True
 
-    if "employee_id" in changes and changes["employee_id"] != user.employee_id:
+    link_changed = "employee_id" in changes and changes["employee_id"] != user.employee_id
+    if link_changed:
         if changes["employee_id"] is not None:
             _ensure_employee_linkable(db, changes["employee_id"], except_user_id=user.id)
-        user.employee_id = changes["employee_id"]
-        changed = True
+        elif user.role.name == RoleName.EMPLOYEE:
+            raise _employee_link_required_error()
 
-    if not changed:
+    if not email_changed and not link_changed:
         return user  # nothing to save or record
-    return _save(db, actor=actor, action=AuditAction.USER_UPDATED, user=user, before=before, context=context)
+    if email_changed:
+        user.email = email
+    if link_changed:
+        user.employee_id = changes["employee_id"]
+    return _save(
+        db,
+        actor=actor,
+        action=AuditAction.USER_UPDATED if email_changed else None,
+        user=user,
+        before=before,
+        context=context,
+        link_changed_from=old_employee_id if link_changed else _NO_LINK_CHANGE,
+    )
 
 
 def change_role(
@@ -255,18 +338,41 @@ def change_role(
     actor: User | None,
     user: User,
     new_role_name: str,
+    employee_id: int | None = None,
     context: AuditContext | None = None,
 ) -> User:
-    """Give a user a different role (audit: user.role_changed)."""
+    """Give a user a different role (audit: user.role_changed).
+
+    Changing TO Employee needs an employee link (order fix b): either the user
+    is already linked, or `employee_id` is given and linked in the same step
+    (extra audit row: user.employee_link_changed).
+    """
     new_role = get_role_by_name(db, new_role_name)
     if user.role_id == new_role.id:
         return user  # nothing changed, nothing to record
     if new_role.name != RoleName.ADMIN:
         _ensure_not_losing_last_admin(db, actor, user, "remove the Admin role from")
 
+    old_employee_id = user.employee_id
+    relink = employee_id is not None and employee_id != user.employee_id
+    if relink:
+        _ensure_employee_linkable(db, employee_id, except_user_id=user.id)
+    if new_role.name == RoleName.EMPLOYEE and not relink and user.employee_id is None:
+        raise _employee_link_required_error()
+
     before = audit.snapshot(user, _AUDIT_FIELDS)
     user.role = new_role
-    return _save(db, actor=actor, action=AuditAction.USER_ROLE_CHANGED, user=user, before=before, context=context)
+    if relink:
+        user.employee_id = employee_id
+    return _save(
+        db,
+        actor=actor,
+        action=AuditAction.USER_ROLE_CHANGED,
+        user=user,
+        before=before,
+        context=context,
+        link_changed_from=old_employee_id if relink else _NO_LINK_CHANGE,
+    )
 
 
 def set_active(
@@ -285,7 +391,7 @@ def set_active(
     if user.is_active == active:
         return user  # already in that state
     if not active:
-        _ensure_not_losing_last_admin(db, actor, user, "deactivate")
+        ensure_can_deactivate(db, actor, user)
 
     before = audit.snapshot(user, _AUDIT_FIELDS)
     user.is_active = active

@@ -8,8 +8,10 @@ what we own, where it is, who has it, and what needs attention.
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
 **Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
-user management. Phase 2 (Master data) in progress: **Slice 2.1 Asset categories** built
-(pending sign-off). Business pages not built yet show "Coming soon" until their phase.
+user management. Phase 2 (Master data) in progress: **Slice 2.1 Asset categories** done
+(signed off); **Slice 2.2 Employees** built (pending sign-off), including the rule that every
+Employee-role login is linked to an employee record. Business pages not built yet show
+"Coming soon" until their phase.
 
 ---
 
@@ -173,7 +175,9 @@ track of which ones have run, so every computer ends up with exactly the same ta
 
 Expected: it runs each migration, for example `Running upgrade 0001 -> 0002, Roles, employees
 (minimal) and users`. Migration 0002 also adds the three roles: Admin, IT Manager, Employee.
-Migration 0004 adds the `asset_categories` table (Slice 2.1).
+Migration 0004 adds the `asset_categories` table (Slice 2.1). Migration 0005 completes the
+`employees` table (department, designation, phone; case-insensitive unique employee ID and work
+email) and keeps existing rows (Slice 2.2).
 
 Other useful Alembic commands (later slices):
 
@@ -213,9 +217,12 @@ Admin already exists, it does nothing.
 For quick development test accounts you can also use (refuses to run in production):
 
 ```powershell
-.venv\Scripts\python -m app.scripts.create_user --role Employee
 .venv\Scripts\python -m app.scripts.create_user --role "IT Manager"
+.venv\Scripts\python -m app.scripts.create_user --role Employee --employee-code EMP-001
 ```
+
+Since Slice 2.2 an **Employee** login must be linked to an employee record: add the employee on
+the **Employees** page first, then pass its employee ID with `--employee-code`.
 
 **Check who changed whose role** (audit log):
 
@@ -323,10 +330,10 @@ is on.
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
 | `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
 | `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once items/assets use the category (applies from Slices 2.4 / 3.2). Every change audited. |
-| `app/modules/employees/` | Minimal `employees` table (completed in Slice 2.2). |
+| `app/modules/employees/` | Employees (Slice 2.2): `/api/v1/employees` for Admin and IT Manager (list with search by ID/name/department, filters by status, department and has-login; `/departments` for suggestions; get, create, edit, activate/deactivate). Never deleted (BR-12). Deactivating an employee also deactivates the linked login. Every change audited. |
 | `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
 | `app/modules/audit/` | Append-only audit log: `models.py` (table), `actions.py` (every action name), `service.py` (`audit.record(...)`: writes in the caller's transaction and strips secrets). |
-| `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts). |
+| `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts; `--employee-code` links an employee, required for the Employee role). |
 | `scripts/sql/` | Handy read-only SQL queries, e.g. `recent_role_changes.sql`. |
 | `docker/init-test-db.sql` | Creates the `itam_test` database the first time the Docker database starts. |
 | `alembic.ini`, `alembic/` | Migration tool settings; `alembic/env.py` reads `DATABASE_URL`; `alembic/versions/` holds each migration. |
@@ -364,6 +371,8 @@ is on.
 | `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `users/` (Users page, create/edit form); `dev/ComponentGalleryPage` (development only). |
 | `src/api/users.js` | Calls to the Admin-only user endpoints. |
 | `src/api/categories.js` | Calls to the category endpoints, plus the "One-by-one" / "By quantity" labels. |
+| `src/api/employees.js`, `src/pages/employees/` | Employees page (Admin and IT Manager): list, search, department/status filters, add/edit dialog with department suggestions, activate/deactivate with a confirm box that warns when a login will be deactivated too. |
+| `src/components/EmployeePicker.jsx` | Search-as-you-type picker of active employees without a login; used in the Users dialogs (required for the Employee role). |
 | `src/pages/categories/` | Categories page (Admin and IT Manager): list, search, filter, add/edit dialog, activate/deactivate with a confirm box. |
 | `src/components/DataTable.jsx` | Search box, server-side paging and sorting, loading/empty/error states. |
 | `src/components/FormField.jsx` | Text box with label, required `*` and error message. |
@@ -393,3 +402,9 @@ is on.
 | Categories: `category_name_taken` | A category with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing one. |
 | Categories: `tracking_type_locked` | Items or assets already use this category, so it cannot switch between one-by-one and by quantity (from Slice 2.4 / 3.2 onward). |
 | Categories: there is no Delete | On purpose (BR-12). Deactivate the category instead; it stays visible but cannot be chosen for new records. |
+| Users: `employee_link_required` | An Employee login must be linked to an employee record. Pick one in the dialog (add the employee on the Employees page first). |
+| Users: `employee_has_login` / `employee_inactive` | That employee already has a login, or is deactivated. Pick another, or activate the employee first. |
+| Users page shows **Needs employee link** | An Employee login created before Slice 2.2 without an employee record (R3). It still works; edit the user and pick the employee. |
+| Employees: `employee_code_taken` / `work_email_taken` | Another employee already has that employee ID or work email (upper/lower case is ignored). |
+| Employees: `cannot_change_self` | The employee record is linked to your own login, and deactivating it would lock you out. Ask another Admin. |
+| `create_user` says `--employee-code is required` | Employee logins need an employee record: add one on the Employees page, then pass its ID. |

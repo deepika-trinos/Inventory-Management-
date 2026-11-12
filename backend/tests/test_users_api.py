@@ -315,7 +315,7 @@ def test_users_responses_never_contain_password_data(client, admin_session, make
     responses = [
         client.get(USERS, headers=headers),
         client.get(f"{USERS}/{user.id}", headers=headers),
-        client.post(USERS, headers=headers, json={"email": "p@example.com", "password": TEMP_PASSWORD, "role": "Employee"}),
+        client.post(USERS, headers=headers, json={"email": "p@example.com", "password": TEMP_PASSWORD, "role": "IT Manager"}),
         client.patch(f"{USERS}/{user.id}/role", headers=headers, json={"role": "IT Manager"}),
     ]
 

@@ -14,8 +14,9 @@ export async function listUsers({ page, pageSize, sort, search, role, isActive }
   return data
 }
 
-export async function createUser({ email, password, role }) {
-  const { data } = await apiClient.post(BASE, { email, password, role })
+// employeeId: required for the Employee role (Slice 2.2), optional otherwise.
+export async function createUser({ email, password, role, employeeId = null }) {
+  const { data } = await apiClient.post(BASE, { email, password, role, employee_id: employeeId })
   return data
 }
 
@@ -24,8 +25,11 @@ export async function updateUser(id, changes) {
   return data
 }
 
-export async function changeUserRole(id, role) {
-  const { data } = await apiClient.patch(`${BASE}/${id}/role`, { role })
+// employeeId: links an employee in the same step (needed when changing to Employee without a link).
+export async function changeUserRole(id, role, employeeId = null) {
+  const body = { role }
+  if (employeeId) body.employee_id = employeeId
+  const { data } = await apiClient.patch(`${BASE}/${id}/role`, body)
   return data
 }
 

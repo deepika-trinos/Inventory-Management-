@@ -1,6 +1,9 @@
 // Users page (Admin only, AUTH-05): list, search and filter users; create and
 // edit them; change role and activate/deactivate, each after a confirm box.
-// The server enforces every rule again (Admin only, not yourself, last Admin).
+// Slice 2.2: Employee logins must be linked to an employee record. Old unlinked
+// ones (R3) are flagged "Needs employee link"; changing a role to Employee asks
+// for the employee when the user has none.
+// The server enforces every rule again (Admin only, not yourself, last Admin, link).
 import { useCallback, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
@@ -15,6 +18,7 @@ import ConfirmDialog from '../../components/ConfirmDialog'
 import DataTable from '../../components/DataTable'
 import { useAuth } from '../../context/AuthContext'
 import { useNotify } from '../../context/NotificationContext'
+import EmployeePicker from '../../components/EmployeePicker'
 import { ROLES } from '../../routes/navigation'
 import { formatDateTime } from '../../utils/dates'
 import UserFormDialog from './UserFormDialog'
@@ -34,6 +38,7 @@ export default function UsersPage() {
   // Which dialog is open: { type: 'create' | 'edit' | 'role' | 'active', user }
   const [dialog, setDialog] = useState(null)
   const [newRole, setNewRole] = useState('')
+  const [roleEmployee, setRoleEmployee] = useState(null) // employee to link when changing to Employee
   const close = () => setDialog(null)
 
   const fetchRows = useCallback(
@@ -65,6 +70,11 @@ export default function UsersPage() {
             <Typography variant="caption" color="text.secondary">
               {u.employee.full_name} ({u.employee.employee_code})
             </Typography>
+          ) : null}
+          {u.needs_employee_link ? (
+            <Tooltip title="Created before employee records existed. Edit the user to link one.">
+              <Chip size="small" color="warning" variant="outlined" label="Needs employee link" sx={{ ml: 1 }} />
+            </Tooltip>
           ) : null}
         </Box>
       ),
@@ -98,7 +108,7 @@ export default function UsersPage() {
         const isMe = u.id === me?.id
         return (
           <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
-            <Tooltip title="Edit email">
+            <Tooltip title="Edit email or employee record">
               <IconButton size="small" aria-label={`Edit ${u.email}`} onClick={() => setDialog({ type: 'edit', user: u })}>
                 <EditOutlined fontSize="small" />
               </IconButton>
@@ -111,6 +121,7 @@ export default function UsersPage() {
                   disabled={isMe}
                   onClick={() => {
                     setNewRole(u.role.name)
+                    setRoleEmployee(null)
                     setDialog({ type: 'role', user: u })
                   }}
                 >
@@ -170,6 +181,8 @@ export default function UsersPage() {
   )
 
   const target = dialog?.user
+  // Changing to Employee needs an employee link when the user has none (order fix b).
+  const roleNeedsEmployee = newRole === ROLES.EMPLOYEE && !target?.employee
 
   return (
     <Stack spacing={2}>
@@ -210,10 +223,13 @@ export default function UsersPage() {
         title={`Change role of ${target?.email ?? ''}?`}
         message={`Current role: ${target?.role.name ?? ''}. The new role applies on their next action.`}
         confirmLabel="Change role"
-        confirmDisabled={!newRole || newRole === target?.role.name}
+        confirmDisabled={!newRole || newRole === target?.role.name || (roleNeedsEmployee && !roleEmployee)}
         onCancel={close}
         onConfirm={() =>
-          runAction(() => changeUserRole(target.id, newRole), `${target.email} is now ${newRole}.`)
+          runAction(
+            () => changeUserRole(target.id, newRole, roleNeedsEmployee ? roleEmployee?.id : null),
+            `${target.email} is now ${newRole}.`,
+          )
         }
       >
         <TextField
@@ -230,6 +246,14 @@ export default function UsersPage() {
             </MenuItem>
           ))}
         </TextField>
+        {roleNeedsEmployee ? (
+          <EmployeePicker
+            value={roleEmployee}
+            onChange={setRoleEmployee}
+            required
+            helperText="An Employee login must be linked to an employee record."
+          />
+        ) : null}
       </ConfirmDialog>
 
       <ConfirmDialog

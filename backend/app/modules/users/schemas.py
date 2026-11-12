@@ -8,7 +8,7 @@ if a route returns the full database object.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 RoleNameField = Literal["Admin", "IT Manager", "Employee"]
 
@@ -44,6 +44,13 @@ class UserRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def needs_employee_link(self) -> bool:
+        """True for Employee-role users without an employee link (R3: created
+        before Slice 2.2). They can still log in until an Admin links them."""
+        return self.role.name == "Employee" and self.employee is None
+
 
 class UserPage(BaseModel):
     """One page of users: the shared paged-list format."""
@@ -72,12 +79,14 @@ class UserCreate(BaseModel):
     )
     role: RoleNameField
     employee_id: int | None = Field(
-        default=None, description="Optional link to an employee record (one login per employee)."
+        default=None,
+        description="Link to an ACTIVE employee record without a login. Required for the Employee role.",
     )
 
 
 class UserUpdate(BaseModel):
-    """Send only the fields you want to change. employee_id: null removes the link."""
+    """Send only the fields you want to change. employee_id: null removes the link
+    (not allowed for Employee-role users)."""
 
     email: str | None = Field(default=None, min_length=3, max_length=255)
     employee_id: int | None = None
@@ -85,3 +94,7 @@ class UserUpdate(BaseModel):
 
 class RoleChange(BaseModel):
     role: RoleNameField
+    employee_id: int | None = Field(
+        default=None,
+        description="Employee to link in the same step. Needed when changing to Employee and the user has no link.",
+    )
