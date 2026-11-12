@@ -1,7 +1,7 @@
 # Phase 2 (Master data) — wrap-up
 
-- **Status:** all four slices built. 2.1, 2.2 and 2.3 are signed off; **2.4 awaits sign-off**,
-  and with it Phase 2.
+- **Status:** ✅ **Phase 2 signed off by the owner on 2026-11-12** (Slices 2.1–2.4, decisions
+  B35–B41 approved). P1–P8 and T1 below were accepted as proposed (decisions.md sections 3 and 13).
 - **Date:** 2026-11-12
 - **Phase goal (build plan):** "Core reference records are available." Met: categories,
   employees, vendors and bulk stock items can be created, found, edited and deactivated, never
@@ -112,4 +112,5 @@ Still open from earlier:
 - **T1:** approve a frontend test tool (Vitest + React Testing Library). It is "recommended before Phase 3"; the purchase and receiving screens are the most complex so far.
 - **R2** (temporary passwords) and **Q12** (hosting) don't block Phase 3.
 
-Also: a **sign-off of Slice 2.4 / Phase 2**, including decisions **B35–B41**.
+**Outcome (2026-11-12):** Slice 2.4 / Phase 2 signed off; B35–B41 approved; P1–P8 accepted as
+proposed; T1 approved.

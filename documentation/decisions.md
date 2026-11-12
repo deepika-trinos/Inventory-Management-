@@ -75,6 +75,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | pwdlib + Argon2 | Password hashing (stores a one-way scrambled fingerprint, never the password) | ✅ Approved (passlib + bcrypt **not** chosen) | 2026-11-10 | 1.3 |
 | PyJWT | Creates and checks JWT login tokens | ✅ Approved (python-jose **not** chosen) | 2026-11-10 | 1.3 |
 | httpx (testing only) | Required by FastAPI's test client to call the API inside tests | ✅ Approved with the Slice 1.2 sign-off | 2026-11-10 | 1.2 |
+| Vitest + React Testing Library (testing only) | Automatic tests for the screens (`npm test`); development only, never shipped to users | ✅ Approved (T1) | 2026-11-12 | Phase 3 (not installed yet) |
 
 ---
 
@@ -94,9 +95,8 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 |---|---|---|---|
 | Q12 | Hosting provider and domain | Slice 8.5 | Before Phase 8 starts |
 | R2 | **Temporary passwords:** must a user change the temporary password at first login? Is a "forgot / reset password" feature needed (the PRD has none)? Today the Admin hands over the password and the user keeps it. | Nothing in Phase 2; affects security review (Slice 8.3) | Before Slice 8.3 |
-| T1 | **Frontend automated tests:** approve a test tool (suggested: Vitest + React Testing Library)? None is approved yet, so the screens are checked manually. | Nothing; recommended before Phase 3 | When convenient |
 
-**R1 is decided (see section 8). R3 is decided (see section 10). Nothing OPEN blocks Phase 2. Before Phase 3, see the questions in `Phase2_WrapUp.md` (P1-P8).**
+**R1 is decided (see section 8). R3 is decided (see section 10). T1 is approved (see section 3). P1–P8 are decided (see section 13). Nothing OPEN blocks Phase 3.**
 
 ---
 
@@ -186,7 +186,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 
 ---
 
-## 12. Decisions in Slice 2.4 (pending the owner's sign-off of that slice)
+## 12. Decisions in Slice 2.4 (✅ Slice 2.4 signed off by the owner, 2026-11-12; B35–B41 approved)
 
 | # | Decision | Why | Date | Slice |
 |---|---|---|---|---|
@@ -197,3 +197,22 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | B39 | **PRD 9.2 inventory model: a stored balance plus movement history.** `quantity_on_hand` (>= 0, database check, INV-07) is the balance; it is read-only in the API (sending it is a validation error) and starts at 0. From Slice 3.3, every change writes a stock movement row and updates the balance **in the same transaction**, so the two always match; serialized items never become stock items (category must be "bulk"). | Answers the PRD 9.2 question (balance vs derived). A stored balance is fast to read for lists and low-stock checks; one transaction keeps it consistent with the history. | 2026-11-12 | 2.4 (3.3, 4.4, 4.5) |
 | B40 | **Stock item category rules:** on create, and whenever the category is changed, it must be an **active** category tracked **by quantity** (`category_not_bulk`, `category_inactive`). An item keeps working if its category is deactivated later. Stock items (active or inactive) now count as "category in use" for the tracking-type lock (B14). | Brief's key rule; PRD 9.2. | 2026-11-12 | 2.4 |
 | B41 | **Stock item names are unique within their category**, ignoring case (the same name may exist in another category). Name limit 150 characters. Search matches part of the name; filters: category and status. API path `/api/v1/stock-items` (module `inventory`). Helper `ensure_stock_item_usable()` (`stock_item_inactive`) for Slices 3.1, 4.4 and 4.5. Audit actions `stock_item.created/updated/activated/deactivated`. | Brief; same patterns as categories and vendors. | 2026-11-12 | 2.4 |
+
+---
+
+## 13. Phase 2 sign-off and Phase 3 decisions
+
+**✅ Phase 2 (Master data) signed off by the owner on 2026-11-12** (Slices 2.1–2.4, decisions B13–B41).
+
+Phase 3 questions from `Phase2_WrapUp.md`, **all accepted as proposed** by the owner on 2026-11-12:
+
+| # | Decision | Affects slice(s) |
+|---|---|---|
+| P1 ✅ | **Purchase lines:** a bulk line points to an existing **stock item**; a serialized line points to a **category plus a free-text description** (e.g. "Laptops: Dell Latitude 5440"). | 3.1 |
+| P2 ✅ | **Money:** Indian rupees (INR) only; unit cost with **2 decimal places**; a cost of **0 is allowed** (free or replacement items). No tax (excluded by the PRD). | 3.1 |
+| P3 ✅ | **Invoice / reference number:** **required**, **unique per vendor** ignoring case. The purchase date **cannot be in the future**. | 3.1 |
+| P4 ✅ | **Short deliveries** (with Q2, one receipt per line): the received quantity may be **lower** than ordered, **never higher**; the line is then closed. | 3.2, 3.3 |
+| P5 ✅ | **Receiving one-by-one items:** **serial number and model required**; brand, warranty expiry and location (typed, Q1) optional. Serial numbers **unique across all assets**, ignoring case (AST-06). | 3.2 |
+| P6 ✅ | **Who:** Admin and IT Manager may create, receive and cancel purchases. A **received purchase is final**: mistakes are corrected by a stock adjustment (4.4) or by retiring the asset (4.2). | 3.1–3.3 |
+| P7 ✅ | **Stock movement types:** `receipt`, `issue`, `adjustment_in`, `adjustment_out`, `opening`. | 3.3, 4.4, 4.5 |
+| P8 ✅ | **Vendors are never deleted** (BR-12), even ones without purchases. No change. | — |

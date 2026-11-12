@@ -8,11 +8,12 @@ what we own, where it is, who has it, and what needs attention.
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
 **Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
-user management. **Phase 2 (Master data) complete, pending sign-off:** asset categories (2.1),
-employees (2.2; every Employee-role login is linked to an employee record) and vendors (2.3) are
-signed off; **bulk stock items (2.4)** are built and await sign-off. See
-[documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). Business pages not built yet
-show "Coming soon" until their phase.
+user management. **Phase 2 (Master data) complete and signed off (2026-11-12):** asset
+categories (2.1), employees (2.2; every Employee-role login is linked to an employee record),
+vendors (2.3) and bulk stock items (2.4). See
+[documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). Next: Phase 3 (Purchases); its
+open questions are decided (decisions.md section 13). Business pages not built yet show
+"Coming soon" until their phase.
 
 ---
 
