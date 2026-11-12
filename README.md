@@ -8,10 +8,11 @@ what we own, where it is, who has it, and what needs attention.
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
 **Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
-user management. Phase 2 (Master data) in progress: **Slice 2.1 Asset categories** and
-**Slice 2.2 Employees** done (signed off; every Employee-role login is linked to an employee
-record); **Slice 2.3 Vendors** built (pending sign-off). Business pages not built yet show
-"Coming soon" until their phase.
+user management. **Phase 2 (Master data) complete, pending sign-off:** asset categories (2.1),
+employees (2.2; every Employee-role login is linked to an employee record) and vendors (2.3) are
+signed off; **bulk stock items (2.4)** are built and await sign-off. See
+[documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). Business pages not built yet
+show "Coming soon" until their phase.
 
 ---
 
@@ -177,7 +178,8 @@ Expected: it runs each migration, for example `Running upgrade 0001 -> 0002, Rol
 (minimal) and users`. Migration 0002 also adds the three roles: Admin, IT Manager, Employee.
 Migration 0004 adds the `asset_categories` table (Slice 2.1). Migration 0005 completes the
 `employees` table (department, designation, phone; case-insensitive unique employee ID and work
-email) and keeps existing rows (Slice 2.2). Migration 0006 adds the `vendors` table (Slice 2.3).
+email) and keeps existing rows (Slice 2.2). Migration 0006 adds the `vendors` table (Slice 2.3). Migration 0007 adds the `stock_items` table
+(Slice 2.4).
 
 Other useful Alembic commands (later slices):
 
@@ -329,6 +331,7 @@ is on.
 | `app/modules/<module>/` | One folder per feature: `models.py` (tables), `schemas.py` (request/response shapes), `service.py` (business logic), `routes.py` (API endpoints). |
 | `app/modules/health/` | `GET /health` (no table, so no `models.py`). |
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
+| `app/modules/inventory/` | Items tracked **by quantity** (Slice 2.4): `/api/v1/stock-items` for Admin and IT Manager (list with name search and category/status filters; get, create, edit, activate/deactivate). Category must be an **active "by quantity" (bulk)** category; name unique within its category; fixed unit list; reorder threshold 0 or more. `quantity_on_hand` is read-only (only stock movements change it, from Slice 3.3). Deactivation only at zero stock. Never deleted. Every change audited. |
 | `app/modules/vendors/` | Vendors (Slice 2.3): `/api/v1/vendors` for Admin and IT Manager (list with search by name, contact person, email or phone and a status filter; get, create, edit, activate/deactivate). Only the name is required; names are unique ignoring case. Never deleted (BR-12, VEN-05). `ensure_vendor_active()` blocks inactive vendors for new purchases (used from Slice 3.1). Every change audited. |
 | `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
 | `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once items/assets use the category (applies from Slices 2.4 / 3.2). Every change audited. |
@@ -373,6 +376,7 @@ is on.
 | `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `users/` (Users page, create/edit form); `dev/ComponentGalleryPage` (development only). |
 | `src/api/users.js` | Calls to the Admin-only user endpoints. |
 | `src/api/categories.js` | Calls to the category endpoints, plus the "One-by-one" / "By quantity" labels. |
+| `src/api/stockItems.js`, `src/pages/inventory/` | Inventory page (Admin and IT Manager): stock items with category, unit, reorder threshold and read-only quantity on hand; add/edit dialog whose category list shows only active "By quantity" categories; activate/deactivate with a confirm box. |
 | `src/api/vendors.js`, `src/pages/vendors/` | Vendors page (Admin and IT Manager): list, search, status filter, add/edit dialog, activate/deactivate with a confirm box; vendor detail page `/vendors/:id` with Edit/Deactivate and a **Purchase history** placeholder that Slice 3.4 fills in. |
 | `src/api/employees.js`, `src/pages/employees/` | Employees page (Admin and IT Manager): list, search, department/status filters, add/edit dialog with department suggestions, activate/deactivate with a confirm box that warns when a login will be deactivated too. |
 | `src/components/EmployeePicker.jsx` | Search-as-you-type picker of active employees without a login; used in the Users dialogs (required for the Employee role). |
@@ -405,6 +409,12 @@ is on.
 | Categories: `category_name_taken` | A category with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing one. |
 | Categories: `tracking_type_locked` | Items or assets already use this category, so it cannot switch between one-by-one and by quantity (from Slice 2.4 / 3.2 onward). |
 | Categories: there is no Delete | On purpose (BR-12). Deactivate the category instead; it stays visible but cannot be chosen for new records. |
+| Inventory: `category_not_bulk` | That category is tracked one by one (e.g. laptops). Stock items need a "By quantity" category. |
+| Inventory: `category_inactive` / empty category list | Only active "By quantity" categories can be chosen. Add or activate one on the Categories page first. |
+| Inventory: `stock_item_name_taken` | That category already has an item with this name (upper/lower case is ignored). |
+| Inventory: `stock_not_zero` / `unit_locked` | An item with stock can't be deactivated, and its unit can't change (from Slice 3.3, once stock is received). |
+| Inventory: quantity on hand can't be edited | On purpose: it changes only through receiving (3.3), issue/adjust (4.4) and opening stock (4.5). |
+| Categories: `tracking_type_locked` now | Since Slice 2.4, a category with stock items can't switch between one-by-one and by quantity. |
 | Vendors: `vendor_name_taken` | A vendor with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing vendor. |
 | Vendors: there is no Delete | On purpose (BR-12, VEN-05). Deactivate the vendor instead: it stays visible, but new purchases can't use it (from Slice 3.1). |
 | Users: `employee_link_required` | An Employee login must be linked to an employee record. Pick one in the dialog (add the employee on the Employees page first). |

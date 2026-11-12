@@ -32,7 +32,7 @@ All **82** PRD requirement IDs appear in at least one slice of build plan v1.2. 
 **Smaller gaps found (not missing IDs; to keep in mind when building those slices):**
 
 1. **BR-13 (traceability):** Slices 4.4 (stock issue/adjust), 5.2 (return) and 6.2 (maintenance status changes) don't mention writing an audit log entry. BR-13 requires it. Slice 8.1's done-check expects returns and stock changes in the audit log.
-2. **BR-12 (deactivate, don't delete):** Listed for employees (2.2) and vendors (2.3), but not for asset categories (2.1) or bulk stock items (2.4). Both of those are referenced by other records. *Categories: handled in Slice 2.1 (B13). Stock items: still to apply in Slice 2.4.*
+2. **BR-12 (deactivate, don't delete):** Listed for employees (2.2) and vendors (2.3), but not for asset categories (2.1) or bulk stock items (2.4). Both of those are referenced by other records. *Resolved: categories in Slice 2.1 (B13), stock items in Slice 2.4 (B38).*
 3. **PRD 17.2 "Maintenance ownership"** (separate technician role) had no question in the plan. It is now recorded as Q13 below.
 
 ---
@@ -96,7 +96,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | R2 | **Temporary passwords:** must a user change the temporary password at first login? Is a "forgot / reset password" feature needed (the PRD has none)? Today the Admin hands over the password and the user keeps it. | Nothing in Phase 2; affects security review (Slice 8.3) | Before Slice 8.3 |
 | T1 | **Frontend automated tests:** approve a test tool (suggested: Vitest + React Testing Library)? None is approved yet, so the screens are checked manually. | Nothing; recommended before Phase 3 | When convenient |
 
-**R1 is decided (see section 8). R3 is decided (see section 10). Nothing OPEN blocks Slices 2.3 or 2.4.**
+**R1 is decided (see section 8). R3 is decided (see section 10). Nothing OPEN blocks Phase 2. Before Phase 3, see the questions in `Phase2_WrapUp.md` (P1-P8).**
 
 ---
 
@@ -174,7 +174,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 
 ---
 
-## 11. Decisions in Slice 2.3 (pending the owner's sign-off of that slice)
+## 11. Decisions in Slice 2.3 (✅ Slice 2.3 signed off by the owner, 2026-11-12)
 
 | # | Decision | Why | Date | Slice |
 |---|---|---|---|---|
@@ -183,3 +183,17 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | B32 | **Vendor detail page at `/vendors/:id`** with Edit, Activate/Deactivate and a **Purchase history** section that is a placeholder until Slice 3.4 (VEN-04). The vendor name in the list links to it. | Owner's answer, 2026-11-12. Gives Slice 3.4 a page with its own address to fill in. | 2026-11-12 | 2.3 (3.4) |
 | B33 | **Inactive vendors** stay readable and editable; only new purchases are blocked, through `ensure_vendor_active()` (`vendor_inactive`), which Slice 3.1 calls. Repeating activate/deactivate changes nothing and writes no audit row. | BR-12 / VEN-05; same pattern as categories (B13, B16) and employees (B28). | 2026-11-12 | 2.3 (3.1) |
 | B34 | **Vendor search** (VEN-03) matches part of the name, contact person, email or phone, ignoring case; the only filter is status. Audit actions: `vendor.created`, `vendor.updated`, `vendor.activated`, `vendor.deactivated` (before/after of every field). | VEN-03 and BR-13 (B11). | 2026-11-12 | 2.3 |
+
+---
+
+## 12. Decisions in Slice 2.4 (pending the owner's sign-off of that slice)
+
+| # | Decision | Why | Date | Slice |
+|---|---|---|---|---|
+| B35 | **Unit of measure is a fixed list:** pieces, boxes, packs, pairs, sets, rolls, metres (database check constraint). Adding a unit later is a small migration. | Owner's answer, 2026-11-12. Keeps reports consistent (no "pcs" vs "pieces"). | 2026-11-12 | 2.4 |
+| B36 | **The unit locks once the item has stock** (`unit_locked`). The guard exists now but cannot fire until stock arrives: Slice 3.3 must also count "any stock movement exists" in `_has_stock_history()`. Name, category and threshold stay editable. | Owner's answer, 2026-11-12: 10 boxes must not silently become 10 pieces. | 2026-11-12 | 2.4 (3.3) |
+| B37 | **Reorder threshold is required**, a whole number from 0 to 1,000,000; the form starts at 0. Low stock (Slice 4.3, INV-06) = quantity at or below the threshold, so 0 warns only when stock runs out. | Owner's answer, 2026-11-12. The upper limit is technical. | 2026-11-12 | 2.4 (4.3) |
+| B38 | **A stock item can only be deactivated at zero stock** (`stock_not_zero`); issue or adjust it to 0 first (Slice 4.4). Never deleted (BR-12, closes gap 2 for stock items). Activating does not re-check the category. | Owner's answer, 2026-11-12. | 2026-11-12 | 2.4 (4.4) |
+| B39 | **PRD 9.2 inventory model: a stored balance plus movement history.** `quantity_on_hand` (>= 0, database check, INV-07) is the balance; it is read-only in the API (sending it is a validation error) and starts at 0. From Slice 3.3, every change writes a stock movement row and updates the balance **in the same transaction**, so the two always match; serialized items never become stock items (category must be "bulk"). | Answers the PRD 9.2 question (balance vs derived). A stored balance is fast to read for lists and low-stock checks; one transaction keeps it consistent with the history. | 2026-11-12 | 2.4 (3.3, 4.4, 4.5) |
+| B40 | **Stock item category rules:** on create, and whenever the category is changed, it must be an **active** category tracked **by quantity** (`category_not_bulk`, `category_inactive`). An item keeps working if its category is deactivated later. Stock items (active or inactive) now count as "category in use" for the tracking-type lock (B14). | Brief's key rule; PRD 9.2. | 2026-11-12 | 2.4 |
+| B41 | **Stock item names are unique within their category**, ignoring case (the same name may exist in another category). Name limit 150 characters. Search matches part of the name; filters: category and status. API path `/api/v1/stock-items` (module `inventory`). Helper `ensure_stock_item_usable()` (`stock_item_inactive`) for Slices 3.1, 4.4 and 4.5. Audit actions `stock_item.created/updated/activated/deactivated`. | Brief; same patterns as categories and vendors. | 2026-11-12 | 2.4 |

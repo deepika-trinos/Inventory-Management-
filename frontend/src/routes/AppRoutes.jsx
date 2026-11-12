@@ -16,6 +16,7 @@ import LoginPage from '../pages/LoginPage'
 import NotFoundPage from '../pages/NotFoundPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
+import InventoryPage from '../pages/inventory/InventoryPage'
 import UsersPage from '../pages/users/UsersPage'
 import VendorDetailPage from '../pages/vendors/VendorDetailPage'
 import VendorsPage from '../pages/vendors/VendorsPage'
@@ -32,6 +33,7 @@ const ComponentGalleryPage = import.meta.env.DEV
 const BUILT_PAGES = {
   '/categories': CategoriesPage,
   '/employees': EmployeesPage,
+  '/inventory': InventoryPage,
   '/users': UsersPage,
   '/vendors': VendorsPage,
 }

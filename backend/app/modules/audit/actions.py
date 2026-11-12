@@ -48,6 +48,10 @@ class AuditAction:
     ASSIGNMENT_RETURNED = "assignment.returned"  # Slice 5.2
 
     # Bulk stock
+    STOCK_ITEM_CREATED = "stock_item.created"  # Slice 2.4
+    STOCK_ITEM_UPDATED = "stock_item.updated"  # Slice 2.4
+    STOCK_ITEM_ACTIVATED = "stock_item.activated"  # Slice 2.4
+    STOCK_ITEM_DEACTIVATED = "stock_item.deactivated"  # Slice 2.4
     STOCK_ISSUED = "stock.issued"  # Slice 4.4
     STOCK_ADJUSTED = "stock.adjusted"  # Slice 4.4
 

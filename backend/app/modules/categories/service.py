@@ -84,14 +84,12 @@ def _ensure_name_free(db: Session, name: str, *, except_id: int | None = None) -
 def _category_in_use(db: Session, category: AssetCategory) -> bool:
     """Is any stock item or asset using this category?
 
-    NOTE: nothing can use a category yet, so this returns False for now and the
-    tracking-type guard in update_category() does not apply yet. It STARTS TO
-    APPLY when those tables exist:
-      - Slice 2.4 (bulk stock items): add a check on inventory_items.category_id
-      - Slice 3.2 (serialized assets): add a check on assets.category_id
+    - Slice 2.4: stock items count (any status: an inactive item still uses it).
+    - Slice 3.2 (serialized assets): ADD a check on assets.category_id here.
     """
-    _ = db, category
-    return False
+    from app.modules.inventory.models import StockItem  # here, to avoid a circular import
+
+    return db.scalar(select(StockItem.id).where(StockItem.category_id == category.id).limit(1)) is not None
 
 
 def ensure_category_selectable(db: Session, category_id: int) -> AssetCategory:
