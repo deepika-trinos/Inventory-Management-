@@ -16,6 +16,12 @@ class AuditAction:
     USER_ACTIVATED = "user.activated"  # Slice 1.6
     USER_DEACTIVATED = "user.deactivated"  # Slice 1.6
 
+    # Asset categories (master data)
+    CATEGORY_CREATED = "category.created"  # Slice 2.1
+    CATEGORY_UPDATED = "category.updated"  # Slice 2.1
+    CATEGORY_ACTIVATED = "category.activated"  # Slice 2.1
+    CATEGORY_DEACTIVATED = "category.deactivated"  # Slice 2.1
+
     # Purchases
     PURCHASE_RECEIVED = "purchase.received"  # Slices 3.2-3.3
     PURCHASE_CANCELLED = "purchase.cancelled"  # Slice 3.1

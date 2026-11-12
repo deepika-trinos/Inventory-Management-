@@ -13,6 +13,7 @@ import MainLayout from '../layouts/MainLayout'
 import ComingSoonPage from '../pages/ComingSoonPage'
 import LoginPage from '../pages/LoginPage'
 import NotFoundPage from '../pages/NotFoundPage'
+import CategoriesPage from '../pages/categories/CategoriesPage'
 import UsersPage from '../pages/users/UsersPage'
 import { homePathFor, PAGES } from './navigation'
 import RequireAuth from './RequireAuth'
@@ -25,6 +26,7 @@ const ComponentGalleryPage = import.meta.env.DEV
 
 // Pages that are built. Every other page in PAGES shows "Coming soon".
 const BUILT_PAGES = {
+  '/categories': CategoriesPage,
   '/users': UsersPage,
 }
 

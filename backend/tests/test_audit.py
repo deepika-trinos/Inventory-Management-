@@ -205,7 +205,9 @@ def test_ip_address_and_request_id_are_stored(db, make_user):
 def test_action_list_has_the_agreed_names():
     assert AuditAction.all() == {
         "user.created", "user.updated", "user.role_changed", "user.activated",
-        "user.deactivated", "purchase.received", "purchase.cancelled", "asset.created",
+        "user.deactivated",
+        "category.created", "category.updated", "category.activated", "category.deactivated",  # Slice 2.1
+        "purchase.received", "purchase.cancelled", "asset.created",
         "asset.retired", "assignment.created", "assignment.returned", "stock.issued",
         "stock.adjusted", "maintenance.status_changed",
     }

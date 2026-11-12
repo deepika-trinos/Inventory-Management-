@@ -7,6 +7,7 @@
 import AssignmentIndOutlined from '@mui/icons-material/AssignmentIndOutlined'
 import BadgeOutlined from '@mui/icons-material/BadgeOutlined'
 import BuildOutlined from '@mui/icons-material/BuildOutlined'
+import CategoryOutlined from '@mui/icons-material/CategoryOutlined'
 import DashboardOutlined from '@mui/icons-material/DashboardOutlined'
 import DevicesOutlined from '@mui/icons-material/DevicesOutlined'
 import HistoryOutlined from '@mui/icons-material/HistoryOutlined'
@@ -33,6 +34,7 @@ export const PAGES = [
   { path: '/dashboard', label: 'Dashboard', icon: DashboardOutlined, roles: STAFF, slice: 'Phase 7' },
   { path: '/assets', label: 'Assets', icon: DevicesOutlined, roles: STAFF, slice: 'Phase 4' },
   { path: '/inventory', label: 'Inventory', icon: Inventory2Outlined, roles: STAFF, slice: 'Phase 4' },
+  { path: '/categories', label: 'Categories', icon: CategoryOutlined, roles: STAFF, slice: 'Slice 2.1' },
   { path: '/vendors', label: 'Vendors', icon: StorefrontOutlined, roles: STAFF, slice: 'Slice 2.3' },
   { path: '/purchases', label: 'Purchases', icon: ShoppingCartOutlined, roles: STAFF, slice: 'Phase 3' },
   { path: '/employees', label: 'Employees', icon: BadgeOutlined, roles: STAFF, slice: 'Slice 2.2' },

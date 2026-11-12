@@ -8,7 +8,8 @@ what we own, where it is, who has it, and what needs attention.
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
 **Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
-user management. Business pages show "Coming soon" until their phase.
+user management. Phase 2 (Master data) in progress: **Slice 2.1 Asset categories** built
+(pending sign-off). Business pages not built yet show "Coming soon" until their phase.
 
 ---
 
@@ -172,6 +173,7 @@ track of which ones have run, so every computer ends up with exactly the same ta
 
 Expected: it runs each migration, for example `Running upgrade 0001 -> 0002, Roles, employees
 (minimal) and users`. Migration 0002 also adds the three roles: Admin, IT Manager, Employee.
+Migration 0004 adds the `asset_categories` table (Slice 2.1).
 
 Other useful Alembic commands (later slices):
 
@@ -271,7 +273,7 @@ Open <http://localhost:5173>. You'll see the **Sign in** page. Log in with the A
 
 | Role | Menu |
 |---|---|
-| Admin | Dashboard, Assets, Inventory, Vendors, Purchases, Employees, Assignments, Maintenance, Reports, Users, Audit Log |
+| Admin | Dashboard, Assets, Inventory, Categories, Vendors, Purchases, Employees, Assignments, Maintenance, Reports, Users, Audit Log |
 | IT Manager | The same, without Users and Audit Log |
 | Employee | My Dashboard, My Assets, My Requests |
 
@@ -320,6 +322,7 @@ is on.
 | `app/modules/health/` | `GET /health` (no table, so no `models.py`). |
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
 | `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
+| `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once items/assets use the category (applies from Slices 2.4 / 3.2). Every change audited. |
 | `app/modules/employees/` | Minimal `employees` table (completed in Slice 2.2). |
 | `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
 | `app/modules/audit/` | Append-only audit log: `models.py` (table), `actions.py` (every action name), `service.py` (`audit.record(...)`: writes in the caller's transaction and strips secrets). |
@@ -360,9 +363,11 @@ is on.
 | `src/layouts/MainLayout.jsx`, `Sidebar.jsx` | Top bar (name, role, Log out) and the role-based menu (collapses below 900px wide). |
 | `src/pages/` | `LoginPage`, `NotAllowedPage`, `ComingSoonPage`, `NotFoundPage`; `users/` (Users page, create/edit form); `dev/ComponentGalleryPage` (development only). |
 | `src/api/users.js` | Calls to the Admin-only user endpoints. |
+| `src/api/categories.js` | Calls to the category endpoints, plus the "One-by-one" / "By quantity" labels. |
+| `src/pages/categories/` | Categories page (Admin and IT Manager): list, search, filter, add/edit dialog, activate/deactivate with a confirm box. |
 | `src/components/DataTable.jsx` | Search box, server-side paging and sorting, loading/empty/error states. |
 | `src/components/FormField.jsx` | Text box with label, required `*` and error message. |
-| `src/components/StatusBadge.jsx` | Coloured asset status: Available, Assigned, Under Maintenance, Damaged, Retired. |
+| `src/components/StatusBadge.jsx` | Coloured status: asset statuses (Available, Assigned, Under Maintenance, Damaged, Retired) and record statuses (Active, Inactive). |
 | `src/components/ConfirmDialog.jsx` | "Are you sure?" box for consequential actions. |
 | `src/components/LoadingState.jsx`, `EmptyState.jsx`, `ErrorMessage.jsx` | Loading spinner, "nothing here yet" and error box with "Try again". |
 | `src/utils/dates.js` | `formatDateTime()` / `formatDate()`: show UTC times in the company timezone. |
@@ -385,3 +390,6 @@ is on.
 | Swagger says `401 invalid_token` | The token expired or was pasted with quotes. Log in again and paste only the token. |
 | Users page: `cannot_change_self` | You can't deactivate yourself or remove your own Admin role. Ask another Admin. |
 | Users page: `last_admin` | Make another user an Admin before demoting or deactivating this one. |
+| Categories: `category_name_taken` | A category with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing one. |
+| Categories: `tracking_type_locked` | Items or assets already use this category, so it cannot switch between one-by-one and by quantity (from Slice 2.4 / 3.2 onward). |
+| Categories: there is no Delete | On purpose (BR-12). Deactivate the category instead; it stays visible but cannot be chosen for new records. |
