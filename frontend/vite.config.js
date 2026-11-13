@@ -14,5 +14,8 @@ export default defineConfig({
     include: ['src/**/*.test.{js,jsx}'],
     setupFiles: ['src/test/setup.js'],
     env: { VITE_APP_TIMEZONE: 'Asia/Kolkata' },
+    // Form tests that click through MUI drop-downs take 5-7 s on a busy PC; the
+    // 5 s default made them fail at random (B66).
+    testTimeout: 15000,
   },
 })

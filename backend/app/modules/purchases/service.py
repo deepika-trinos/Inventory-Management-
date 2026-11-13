@@ -1,7 +1,8 @@
-"""Purchases: list, get, create, edit, cancel (Slice 3.1, PUR-01 to PUR-04, PUR-08, BR-06).
+"""Purchases: list, get, create, edit, cancel (Slice 3.1, PUR-01 to PUR-04, PUR-08, BR-06)
+and receive one-by-one items (Slice 3.2, PUR-05, PUR-06, BR-07, BR-08).
 
-Used by the /purchases endpoints (Admin and IT Manager, P6). Slices 3.2 / 3.3 add
-receiving; Slice 3.4 adds the purchase history screens.
+Used by the /purchases endpoints (Admin and IT Manager, P6). Slice 3.3 adds
+receiving by-quantity lines; Slice 3.4 adds the purchase history screens.
 
 Every change writes an audit row in the SAME transaction (BR-13, B11).
 
@@ -23,6 +24,18 @@ RULES
   Lines sent in an edit REPLACE all the draft's lines.
 - Line totals and the purchase total are calculated here, never typed in.
 - BR-12: purchases are never deleted. There is no delete function and no DELETE endpoint.
+
+RECEIVING (Slice 3.2, see receive_purchase)
+- Only a DRAFT is received, in ONE step covering every line (B55). It then becomes
+  RECEIVED and is final (P6).
+- By-quantity lines cannot be received until Slice 3.3 (B56): a purchase with any
+  bulk line is refused (`bulk_receiving_unavailable`).
+- Per line: received quantity 0 to ordered (P4); at least 1 unit in total (B58).
+  Received date: not before the purchase date, not in the future (B58).
+- One asset per unit received (PUR-06, BR-08), status Available, IDs AST-000001...
+- A deactivated vendor or category does not block receiving (B59).
+- Everything (status, quantities, assets, audit rows) in ONE transaction: any
+  failure (e.g. a duplicate serial number) saves nothing.
 """
 
 from datetime import date, datetime
@@ -38,6 +51,8 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
 from app.core.text import optional_text, required_text
+from app.modules.assets import service as assets_service
+from app.modules.assets.models import Asset, AssetStatus
 from app.modules.audit import service as audit
 from app.modules.audit.actions import AuditAction
 from app.modules.audit.service import AuditContext
@@ -45,6 +60,7 @@ from app.modules.categories import service as categories_service
 from app.modules.categories.models import TrackingType
 from app.modules.inventory import service as inventory_service
 from app.modules.purchases.models import LineType, Purchase, PurchaseLine, PurchaseStatus
+from app.modules.purchases.schemas import MAX_UNITS_PER_RECEIPT
 from app.modules.users.models import User
 from app.modules.vendors import service as vendors_service
 from app.modules.vendors.models import Vendor
@@ -130,6 +146,8 @@ def _line_snapshot(line: PurchaseLine) -> dict[str, Any]:
         "quantity": line.quantity,
         "unit_cost": Decimal(line.unit_cost).quantize(Decimal("0.01")),
         "line_total": line.line_total,
+        "received_quantity": line.received_quantity,
+        "asset_codes": [asset.asset_code for asset in line.assets],
     }
 
 
@@ -141,6 +159,7 @@ def _snapshot(purchase: Purchase) -> dict[str, Any]:
         "vendor": purchase.vendor.name if purchase.vendor else None,
         "reference_number": purchase.reference_number,
         "purchase_date": purchase.purchase_date,
+        "received_date": purchase.received_date,
         "notes": purchase.notes,
         "status": purchase.status,
         "total_amount": purchase.total_amount,
@@ -419,3 +438,212 @@ def cancel_purchase(
     return _save(
         db, actor=actor, action=AuditAction.PURCHASE_CANCELLED, purchase=purchase, before=before, context=context
     )
+
+
+# ---- Receiving one-by-one items (Slice 3.2) -------------------------------------------
+
+def _unit_error(error: AppError, line_number: int, unit_number: int) -> AppError:
+    """Add where the unit is (line 1, 2, ... and unit 1, 2, ...) to an error."""
+    details = error.details if isinstance(error.details, dict) else {}
+    return AppError(
+        error.status_code,
+        error.code,
+        f"Line {line_number}, unit {unit_number}: {error.message}",
+        {**details, "line": line_number, "unit": unit_number},
+    )
+
+
+def _check_received_date(purchase: Purchase, value: date) -> date:
+    if value > _today():
+        raise AppError(422, "received_date_in_future", "The received date cannot be in the future.")
+    if value < purchase.purchase_date:
+        raise AppError(
+            422,
+            "received_date_before_purchase",
+            f"The received date cannot be before the purchase date ({purchase.purchase_date.isoformat()}).",
+        )
+    return value
+
+
+def _match_receipt_lines(purchase: Purchase, sent: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """Every line of the purchase must be sent exactly once, and nothing else (B55)."""
+    own_ids = {line.id for line in purchase.lines}
+    by_id: dict[int, dict[str, Any]] = {}
+    for item in sent:
+        line_id = item["line_id"]
+        if line_id not in own_ids:
+            raise AppError(
+                422,
+                "invalid_receipt_line",
+                f"Line id {line_id} is not part of {purchase.purchase_number}.",
+                {"line_id": line_id},
+            )
+        if line_id in by_id:
+            raise AppError(422, "invalid_receipt_line", f"Line id {line_id} was sent twice.", {"line_id": line_id})
+        by_id[line_id] = item
+    for number, line in enumerate(purchase.lines, start=1):
+        if line.id not in by_id:
+            raise _line_error(422, "receipt_line_missing", number, "say how many units arrived (0 if none).")
+    return by_id
+
+
+def _check_receipt(
+    db: Session, purchase: Purchase, sent: dict[int, dict[str, Any]]
+) -> list[tuple[PurchaseLine, int, list[dict[str, Any]]]]:
+    """Check every line and unit BEFORE anything changes. Returns, per line:
+    (line, received quantity, the cleaned details of each unit)."""
+    plan: list[tuple[PurchaseLine, int, list[dict[str, Any]]]] = []
+    seen: dict[str, tuple[int, int]] = {}  # lower(serial) -> (line, unit) where it was first typed
+    total_units = 0
+    for number, line in enumerate(purchase.lines, start=1):
+        item = sent[line.id]
+        quantity = item["received_quantity"]
+        units = item.get("units") or []
+        if quantity > line.quantity:
+            raise _line_error(
+                422,
+                "received_quantity_too_high",
+                number,
+                f"{quantity} received but only {line.quantity} ordered. More than ordered is not allowed.",
+            )
+        if len(units) != quantity:
+            raise _line_error(
+                422,
+                "unit_count_mismatch",
+                number,
+                f"{quantity} received, so enter the details of {quantity} unit(s) (got {len(units)}).",
+            )
+        total_units += quantity
+        if total_units > MAX_UNITS_PER_RECEIPT:
+            raise AppError(422, "too_many_units", f"One receipt can create at most {MAX_UNITS_PER_RECEIPT} assets.")
+
+        cleaned: list[dict[str, Any]] = []
+        for unit_number, unit in enumerate(units, start=1):
+            try:
+                clean = assets_service.clean_unit(unit, default_name=line.description)
+            except AppError as error:
+                raise _unit_error(error, number, unit_number) from None
+            key = clean["serial_number"].lower()
+            if key in seen:
+                first_line, first_unit = seen[key]
+                duplicate = AppError(
+                    409,
+                    "serial_number_duplicate",
+                    f'serial number "{clean["serial_number"]}" is entered twice in this receipt '
+                    f"(also line {first_line}, unit {first_unit}).",
+                    {"other_line": first_line, "other_unit": first_unit},
+                )
+                raise _unit_error(duplicate, number, unit_number)
+            seen[key] = (number, unit_number)
+            cleaned.append(clean)
+        plan.append((line, quantity, cleaned))
+
+    if total_units == 0:
+        raise AppError(422, "nothing_received", "Nothing was received. At least one unit must arrive.")
+
+    # Serial numbers already used by existing assets (AST-06): point at the first one.
+    in_use = assets_service.serials_in_use(db, seen.keys())
+    for number, (_line, _quantity, cleaned) in enumerate(plan, start=1):
+        for unit_number, clean in enumerate(cleaned, start=1):
+            if clean["serial_number"].lower() in in_use:
+                raise _unit_error(assets_service.serial_taken_error(clean["serial_number"]), number, unit_number)
+    return plan
+
+
+def receive_purchase(
+    db: Session,
+    *,
+    actor: User,
+    purchase: Purchase,
+    data: dict[str, Any],
+    context: AuditContext | None = None,
+) -> Purchase:
+    """Receive a DRAFT purchase of one-by-one items in ONE step (Slice 3.2, B55).
+
+    data = {"received_date": date, "lines": [{"line_id", "received_quantity",
+            "units": [{"serial_number", "model", "name", "brand", "warranty_expiry", "location"}]}]}
+
+    Creates one asset per unit received (PUR-06, BR-08), status Available, with
+    the line's category, the purchase date and the line's unit cost (AST-02).
+    The purchase becomes RECEIVED (final, P6). Audit: purchase.received plus one
+    asset.created per asset. All in ONE transaction: any failure saves nothing.
+
+    Errors: 409 `purchase_not_draft`, `bulk_receiving_unavailable` (B56),
+    `serial_number_duplicate` (same serial twice in this receipt),
+    `serial_number_taken` (an existing asset has it);
+    422 `received_date_in_future`, `received_date_before_purchase`,
+    `invalid_receipt_line`, `receipt_line_missing`, `received_quantity_too_high`,
+    `unit_count_mismatch`, `nothing_received`, `too_many_units`,
+    `invalid_serial_number`, `invalid_model`, `invalid_asset_name`, `invalid_brand`,
+    `invalid_location`. Line / unit problems carry details.line and details.unit (1, 2, ...).
+    """
+    _ensure_draft(purchase, "received")
+
+    bulk_lines = [n for n, line in enumerate(purchase.lines, start=1) if line.line_type == LineType.BULK]
+    if bulk_lines:
+        raise AppError(
+            409,
+            "bulk_receiving_unavailable",
+            "This purchase has by-quantity lines. Receiving by-quantity items arrives in Slice 3.3, "
+            "so this purchase cannot be received yet.",
+            {"lines": bulk_lines},
+        )
+
+    received_date = _check_received_date(purchase, data["received_date"])
+    sent = _match_receipt_lines(purchase, data.get("lines") or [])
+    plan = _check_receipt(db, purchase, sent)
+
+    # Everything checked: apply the receipt.
+    before = _snapshot(purchase)
+    new_assets: list[Asset] = []
+    for line, quantity, cleaned in plan:
+        line.received_quantity = quantity
+        for clean in cleaned:
+            asset = Asset(
+                **clean,
+                category_id=line.category_id,
+                category=line.category,
+                purchase_line=line,
+                purchase_date=purchase.purchase_date,
+                cost=line.unit_cost,
+                status=AssetStatus.AVAILABLE,
+                created_by_user_id=actor.id,
+            )
+            db.add(asset)
+            new_assets.append(asset)
+    purchase.received_date = received_date
+    purchase.status = PurchaseStatus.RECEIVED
+
+    try:
+        db.flush()  # the database gives each asset its AST-... ID here
+        audit.record(
+            db,
+            actor=actor,
+            action=AuditAction.PURCHASE_RECEIVED,
+            entity=purchase,
+            before=before,
+            after=_snapshot(purchase),
+            context=context,
+        )
+        for asset in new_assets:
+            audit.record(
+                db,
+                actor=actor,
+                action=AuditAction.ASSET_CREATED,
+                entity=asset,
+                before=None,
+                after=assets_service.snapshot(asset),
+                context=context,
+            )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        # Two receipts saving the same serial number at the same moment: the unique index wins.
+        if assets_service.SERIAL_INDEX in str(exc.orig):
+            raise assets_service.serial_taken_error() from None
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(purchase)
+    return purchase

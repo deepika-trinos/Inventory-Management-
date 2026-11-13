@@ -25,6 +25,7 @@ purchase_lines (P1)
 
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -45,6 +46,9 @@ from app.modules.categories.models import AssetCategory
 from app.modules.inventory.models import StockItem
 from app.modules.users.models import User
 from app.modules.vendors.models import Vendor
+
+if TYPE_CHECKING:
+    from app.modules.assets.models import Asset
 
 
 class PurchaseStatus:
@@ -166,6 +170,8 @@ class PurchaseLine(TimestampMixin, Base):
     purchase: Mapped[Purchase] = relationship(back_populates="lines")
     stock_item: Mapped[StockItem | None] = relationship(lazy="joined")
     category: Mapped[AssetCategory | None] = relationship(lazy="joined")
+    # The assets created when this one-by-one line was received (Slice 3.2, PUR-06).
+    assets: Mapped[list["Asset"]] = relationship(back_populates="purchase_line", lazy="selectin", order_by="Asset.id")
 
     @property
     def line_total(self) -> Decimal:

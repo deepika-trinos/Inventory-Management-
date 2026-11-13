@@ -3,11 +3,13 @@
 // filter by status and vendor. Create a draft, edit a draft, or cancel a draft
 // (after a confirm box). Received and cancelled purchases open read-only.
 // A draft or cancelled purchase never changes stock (PUR-08, BR-06). No delete (BR-12).
-// Receiving arrives in Slices 3.2 / 3.3; the full history screens in Slice 3.4.
+// Receive a draft of one-by-one items (Slice 3.2): each unit becomes an asset.
+// By-quantity receiving arrives in Slice 3.3; the full history screens in Slice 3.4.
 import { useCallback, useEffect, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
+import MoveToInboxOutlined from '@mui/icons-material/MoveToInboxOutlined'
 import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined'
 import { Button, IconButton, Link, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
 
@@ -21,6 +23,8 @@ import { useNotify } from '../../context/NotificationContext'
 import { formatPlainDate } from '../../utils/dates'
 import { formatAmount } from '../../utils/money'
 import PurchaseFormDialog from './PurchaseFormDialog'
+import ReceivePurchaseDialog from './ReceivePurchaseDialog'
+import { receivedMessage } from './receiveForm'
 
 export const CANCEL_PURCHASE_MESSAGE =
   'Cancelling is final: the purchase can no longer be edited or received. Nothing is deleted and no stock changes. Its invoice / reference number can be used again for this vendor.'
@@ -34,7 +38,7 @@ export default function PurchasesPage() {
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
 
-  // Which dialog is open: { type: 'create' | 'edit' | 'cancel', purchase }
+  // Which dialog is open: { type: 'create' | 'edit' | 'cancel' | 'receive', purchase }
   const [dialog, setDialog] = useState(null)
   const close = () => setDialog(null)
 
@@ -107,6 +111,18 @@ export default function PurchasesPage() {
                 {draft ? <EditOutlined fontSize="small" /> : <VisibilityOutlined fontSize="small" />}
               </IconButton>
             </Tooltip>
+            {draft ? (
+              <Tooltip title="Receive">
+                <IconButton
+                  size="small"
+                  color="primary"
+                  aria-label={`Receive ${p.purchase_number}`}
+                  onClick={() => setDialog({ type: 'receive', purchase: p })}
+                >
+                  <MoveToInboxOutlined fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            ) : null}
             {draft ? (
               <Tooltip title="Cancel purchase">
                 <IconButton
@@ -192,6 +208,20 @@ export default function PurchasesPage() {
           onClose={close}
           onSaved={(saved, created) => {
             notify.success(created ? `Draft ${saved.purchase_number} saved.` : `${saved.purchase_number} saved.`)
+            close()
+            reload()
+          }}
+          onReceive={(p) => setDialog({ type: 'receive', purchase: p })}
+        />
+      ) : null}
+
+      {dialog?.type === 'receive' ? (
+        <ReceivePurchaseDialog
+          open
+          purchaseId={target.id}
+          onClose={close}
+          onReceived={(saved) => {
+            notify.success(receivedMessage(saved))
             close()
             reload()
           }}

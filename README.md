@@ -12,9 +12,10 @@ user management. **Phase 2 (Master data) complete and signed off (2026-11-12):**
 categories (2.1), employees (2.2; every Employee-role login is linked to an employee record),
 vendors (2.3) and bulk stock items (2.4). See
 [documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). **Phase 3 (Purchases) in
-progress:** Slice 3.1 (draft purchases: create, edit, cancel; no stock change) is built and
-waiting for sign-off. Next: Slice 3.2 (receive one-by-one items). Business pages not built yet
-show "Coming soon" until their phase.
+progress:** Slice 3.1 (draft purchases: create, edit, cancel; no stock change) is signed off
+(2026-11-13). Slice 3.2 (receive one-by-one items: each unit becomes an asset AST-000001, ...)
+is built and waiting for sign-off. Next: Slice 3.3 (receive by-quantity items). Business pages
+not built yet show "Coming soon" until their phase.
 
 ---
 
@@ -182,7 +183,9 @@ Migration 0004 adds the `asset_categories` table (Slice 2.1). Migration 0005 com
 `employees` table (department, designation, phone; case-insensitive unique employee ID and work
 email) and keeps existing rows (Slice 2.2). Migration 0006 adds the `vendors` table (Slice 2.3). Migration 0007 adds the `stock_items` table
 (Slice 2.4). Migration 0008 adds the `purchases` and `purchase_lines` tables and the
-`purchase_number_seq` sequence behind PUR-000001, PUR-000002, ... (Slice 3.1).
+`purchase_number_seq` sequence behind PUR-000001, PUR-000002, ... (Slice 3.1). Migration 0009
+adds the `assets` table and the `asset_code_seq` sequence behind AST-000001, AST-000002, ...,
+with serial numbers unique ignoring case (Slice 3.2).
 
 Other useful Alembic commands (later slices):
 
@@ -346,7 +349,8 @@ is on.
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
 | `app/modules/inventory/` | Items tracked **by quantity** (Slice 2.4): `/api/v1/stock-items` for Admin and IT Manager (list with name search and category/status filters; get, create, edit, activate/deactivate). Category must be an **active "by quantity" (bulk)** category; name unique within its category; fixed unit list; reorder threshold 0 or more. `quantity_on_hand` is read-only (only stock movements change it, from Slice 3.3). Deactivation only at zero stock. Never deleted. Every change audited. |
 | `app/modules/vendors/` | Vendors (Slice 2.3): `/api/v1/vendors` for Admin and IT Manager (list with search by name, contact person, email or phone and a status filter; get, create, edit, activate/deactivate). Only the name is required; names are unique ignoring case. Never deleted (BR-12, VEN-05). `ensure_vendor_active()` blocks inactive vendors for new purchases (used by purchases since Slice 3.1). Every change audited. |
-| `app/modules/purchases/` | Purchases (Slice 3.1): `/api/v1/purchases` for Admin and IT Manager (list with search by reference number, vendor name or purchase number and status/vendor filters; get one with its lines; create a **draft**; edit or cancel a draft). Numbers PUR-000001... made by the system. Vendor, stock items and categories must be active; reference unique per vendor ignoring case (cancelled ones excepted); date not in the future; at least one line; line totals and the total calculated by the server. Drafts and cancelled purchases never change stock or create assets. No delete. Every change audited. Receiving: Slices 3.2 / 3.3. |
+| `app/modules/purchases/` | Purchases (Slice 3.1): `/api/v1/purchases` for Admin and IT Manager (list with search by reference number, vendor name or purchase number and status/vendor filters; get one with its lines; create a **draft**; edit or cancel a draft). Numbers PUR-000001... made by the system. Vendor, stock items and categories must be active; reference unique per vendor ignoring case (cancelled ones excepted); date not in the future; at least one line; line totals and the total calculated by the server. Drafts and cancelled purchases never change stock or create assets. No delete. Every change audited. **Receiving (Slice 3.2):** `POST /api/v1/purchases/{id}/receive` receives a draft in one step (received date; per line 0 to ordered, with the details of each unit); each unit becomes an asset, the purchase becomes Received (final); all in one transaction with `purchase.received` and `asset.created` audit rows. Purchases with by-quantity lines wait for Slice 3.3. |
+| `app/modules/assets/` | Assets tracked **one by one** (Slice 3.2): the `assets` table (asset ID AST-000001... from a database sequence; serial number unique ignoring case; model required; brand, warranty expiry, location optional; status Available / Assigned / Under Maintenance / Damaged / Retired). `GET /api/v1/assets/{id or asset ID}` for Admin and IT Manager. The asset register is Slice 4.1, edit/retire 4.2, manual entry 4.5. No delete. |
 | `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
 | `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once stock items, purchase lines or assets use the category (stock items from 2.4, purchase lines from 3.1, assets from 3.2). Every change audited. |
 | `app/modules/employees/` | Employees (Slice 2.2): `/api/v1/employees` for Admin and IT Manager (list with search by ID/name/department, filters by status, department and has-login; `/departments` for suggestions; get, create, edit, activate/deactivate). Never deleted (BR-12). Deactivating an employee also deactivates the linked login. Every change audited. |
@@ -393,7 +397,8 @@ is on.
 | `src/api/categories.js` | Calls to the category endpoints, plus the "One-by-one" / "By quantity" labels. |
 | `src/api/stockItems.js`, `src/pages/inventory/` | Inventory page (Admin and IT Manager): stock items with category, unit, reorder threshold and read-only quantity on hand; add/edit dialog whose category list shows only active "By quantity" categories; activate/deactivate with a confirm box. |
 | `src/api/vendors.js`, `src/pages/vendors/` | Vendors page (Admin and IT Manager): list, search, status filter, add/edit dialog, activate/deactivate with a confirm box; vendor detail page `/vendors/:id` with Edit/Deactivate and a **Purchase history** placeholder that Slice 3.4 fills in. |
-| `src/api/purchases.js`, `src/pages/purchases/` | Purchases page (Admin and IT Manager): list with search, status and vendor filters and status badges; **New purchase** / edit-draft form with an active-vendor picker, reference, date, notes and a lines list (each line "By quantity" with an active stock item, or "One-by-one" with an active one-by-one category and a description), quantity and unit cost in ₹, line totals and grand total; cancel a draft after a confirm box. Received/cancelled purchases open read-only. `purchaseForm.js` holds the form's checks and totals (tested in `purchaseForm.test.js` and `PurchaseFormDialog.test.jsx`). |
+| `src/api/purchases.js`, `src/pages/purchases/` | Purchases page (Admin and IT Manager): list with search, status and vendor filters and status badges; **New purchase** / edit-draft form with an active-vendor picker, reference, date, notes and a lines list (each line "By quantity" with an active stock item, or "One-by-one" with an active one-by-one category and a description), quantity and unit cost in ₹, line totals and grand total; cancel a draft after a confirm box. Received/cancelled purchases open read-only. `purchaseForm.js` holds the form's checks and totals (tested in `purchaseForm.test.js` and `PurchaseFormDialog.test.jsx`). **Receive** (Slice 3.2): the inbox icon on a draft row, or **Receive…** in the draft form (save changes first), opens `ReceivePurchaseDialog`: received date, received quantity per line and one row per unit (serial number, model, name, brand, warranty expiry, location), with "copy unit 1 to all units", per-row errors and a confirm box; the success message lists the new asset IDs. A received purchase shows "Received N of M" and its asset IDs per line. `receiveForm.js` holds the checks (tested in `receiveForm.test.js` and `ReceivePurchaseDialog.test.jsx`). |
+| `src/api/assets.js`, `src/pages/assets/AssetDetailsDialog.jsx` | One asset's details (Slice 3.2), opened by clicking an asset ID on a received purchase. The Assets page (register) is Slice 4.1. |
 | `src/utils/money.js` | Rupee amounts: reads them as whole paise (no rounding errors) and shows them as ₹1,23,456.00. |
 | `src/api/employees.js`, `src/pages/employees/` | Employees page (Admin and IT Manager): list, search, department/status filters, add/edit dialog with department suggestions, activate/deactivate with a confirm box that warns when a login will be deactivated too. |
 | `src/components/EmployeePicker.jsx` | Search-as-you-type picker of active employees without a login; used in the Users dialogs (required for the Employee role). |
@@ -445,5 +450,10 @@ is on.
 | Purchases: `purchase_date_in_future` | The purchase date must be today or earlier (company timezone). |
 | Purchases: `purchase_not_draft` | Only drafts can be edited or cancelled. Received and cancelled purchases are final (P6). |
 | Purchases: there is no Delete | On purpose (BR-12). Cancel the draft instead; it stays in the list as **Cancelled** and changes no stock. |
-| Categories: `tracking_type_locked` on a one-by-one category | Since Slice 3.1, a category used on any purchase line can't switch tracking type either. |
+| Categories: `tracking_type_locked` on a one-by-one category | Since Slice 3.1, a category used on any purchase line can't switch tracking type either; since Slice 3.2, nor can a category with any asset (even a retired one). |
+| Receive: `bulk_receiving_unavailable` | The purchase has a "By quantity" line. Receiving by-quantity items arrives in Slice 3.3; until then only purchases with one-by-one lines only can be received. |
+| Receive: `serial_number_taken` / `serial_number_duplicate` | Serial numbers are unique across all assets, ignoring upper/lower case. `taken`: an existing asset already has it. `duplicate`: it is typed twice in this receipt. Nothing was saved; fix the marked row and receive again. |
+| Receive: `received_quantity_too_high` / `nothing_received` | Each line takes 0 up to the ordered quantity (fewer closes the line; the rest is never received later). At least one unit must arrive in the whole receipt. |
+| Receive: `received_date_before_purchase` / `received_date_in_future` | The received date must be between the purchase date and today (company timezone). |
+| Receive: `purchase_not_draft` | Only a draft can be received, once. Received purchases are final (P6): fix mistakes by retiring the asset (Slice 4.2). |
 | `create_user` says `--employee-code is required` | Employee logins need an employee record: add one on the Employees page, then pass its ID. |

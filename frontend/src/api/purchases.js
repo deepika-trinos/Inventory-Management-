@@ -48,3 +48,10 @@ export async function cancelPurchase(id) {
   const { data } = await apiClient.post(`${BASE}/${id}/cancel`)
   return data
 }
+
+// Receive a draft in one step (Slice 3.2): { received_date, lines: [{ line_id, received_quantity, units }] }.
+// Each unit becomes an asset; the new asset IDs come back in lines[].assets. Final.
+export async function receivePurchase(id, body) {
+  const { data } = await apiClient.post(`${BASE}/${id}/receive`, body)
+  return data
+}

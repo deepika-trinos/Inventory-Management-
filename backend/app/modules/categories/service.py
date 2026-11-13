@@ -12,8 +12,8 @@ RULES
   There is deliberately no delete function here and no DELETE endpoint.
 - A deactivated category stays readable, but cannot be chosen for new records
   (ensure_category_selectable; enforced from Slice 2.4 onward).
-- tracking_type cannot change once any item or asset uses the category
-  (_category_in_use; starts to apply from Slice 2.4 / 3.2 onward).
+- tracking_type cannot change once any stock item, purchase line or asset uses
+  the category (_category_in_use, B14 / B46 / B63).
 """
 
 from typing import Any
@@ -87,15 +87,18 @@ def _category_in_use(db: Session, category: AssetCategory) -> bool:
     - Slice 2.4: stock items count (any status: an inactive item still uses it).
     - Slice 3.1: one-by-one purchase lines count, on purchases of ANY status (B46),
       so a draft's serialized line can never end up in a by-quantity category.
-    - Slice 3.2 (serialized assets): ADD a check on assets.category_id here.
+    - Slice 3.2: assets count, whatever their status (B63): a retired laptop is
+      still a one-by-one record and must never be counted as stock.
     """
     # Imported here, to avoid a circular import.
+    from app.modules.assets.models import Asset
     from app.modules.inventory.models import StockItem
     from app.modules.purchases.models import PurchaseLine
 
-    if db.scalar(select(StockItem.id).where(StockItem.category_id == category.id).limit(1)) is not None:
-        return True
-    return db.scalar(select(PurchaseLine.id).where(PurchaseLine.category_id == category.id).limit(1)) is not None
+    for model in (StockItem, PurchaseLine, Asset):
+        if db.scalar(select(model.id).where(model.category_id == category.id).limit(1)) is not None:
+            return True
+    return False
 
 
 def ensure_category_selectable(db: Session, category_id: int) -> AssetCategory:
@@ -103,7 +106,9 @@ def ensure_category_selectable(db: Session, category_id: int) -> AssetCategory:
 
     A deactivated category stays readable (list / get one) but must not be
     picked for new stock items or assets (BR-12). Called by stock items (2.4)
-    and one-by-one purchase lines (3.1); Slice 3.2 (assets) will call it too.
+    and one-by-one purchase lines (3.1). Receiving a draft (3.2) does NOT re-check
+    it: the category was checked when the line was added, and the goods have
+    arrived (B59). Manual asset entry (4.5) will call it.
     """
     category = get_category(db, category_id)
     if not category.is_active:

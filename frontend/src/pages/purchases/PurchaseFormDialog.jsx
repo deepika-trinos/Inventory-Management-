@@ -8,6 +8,8 @@
 //   the real ones (they are never sent).
 // A purchase that is not a draft opens read-only (received and cancelled are final).
 // Problems are shown under the field (or line) they belong to.
+// Slice 3.2: a saved draft has a "Receive…" button (save changes first); a received
+// purchase shows, per line, how many arrived and the asset IDs created (click one to view it).
 import { useEffect, useMemo, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import DeleteOutline from '@mui/icons-material/DeleteOutlined'
@@ -23,6 +25,7 @@ import {
   Divider,
   Grid,
   IconButton,
+  Link,
   MenuItem,
   Paper,
   Stack,
@@ -43,6 +46,7 @@ import LoadingState from '../../components/LoadingState'
 import StatusBadge from '../../components/StatusBadge'
 import { todayInCompanyTimezone } from '../../utils/dates'
 import { formatPaise } from '../../utils/money'
+import AssetDetailsDialog from '../assets/AssetDetailsDialog'
 import {
   DESCRIPTION_MAX,
   emptyLine,
@@ -87,7 +91,10 @@ function withExtras(found, extra) {
 
 const inactiveMark = (record) => (record.status && record.status !== 'active' ? ' (inactive)' : '')
 
-export default function PurchaseFormDialog({ open, purchaseId = null, onClose, onSaved }) {
+// The request body a set of form values would send, as text: to spot unsaved changes.
+const payloadKey = (values) => JSON.stringify(toPayload(values))
+
+export default function PurchaseFormDialog({ open, purchaseId = null, onClose, onSaved, onReceive }) {
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const isCreate = !purchaseId
@@ -103,6 +110,8 @@ export default function PurchaseFormDialog({ open, purchaseId = null, onClose, o
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [savedKey, setSavedKey] = useState(null) // what is saved on the server (for "unsaved changes")
+  const [viewAsset, setViewAsset] = useState(null) // asset ID opened from a received line
 
   // Existing purchase: load it (with its lines).
   useEffect(() => {
@@ -113,8 +122,10 @@ export default function PurchaseFormDialog({ open, purchaseId = null, onClose, o
     getPurchase(purchaseId)
       .then((found) => {
         if (cancelled) return
+        const loaded = valuesFromPurchase(found)
         setPurchase(found)
-        setValues(valuesFromPurchase(found))
+        setValues(loaded)
+        setSavedKey(payloadKey(loaded))
       })
       .catch((err) => !cancelled && setLoadError(err))
       .finally(() => !cancelled && setLoading(false))
@@ -232,6 +243,8 @@ export default function PurchaseFormDialog({ open, purchaseId = null, onClose, o
   const total = grandTotalPaise(values.lines)
   const disabled = saving || readOnly
   const noVendors = options.loaded && options.vendors.length === 0
+  const canReceive = Boolean(onReceive && purchase && purchase.status === 'draft' && !loadError)
+  const unsaved = canReceive && savedKey !== null && payloadKey(values) !== savedKey
 
   let title = 'New purchase'
   if (!isCreate) title = readOnly ? `Purchase ${purchase?.purchase_number ?? ''}` : `Edit draft ${purchase?.purchase_number ?? ''}`
@@ -340,6 +353,8 @@ export default function PurchaseFormDialog({ open, purchaseId = null, onClose, o
               onChange={(field) => handleLineChange(index, field)}
               onTypeChange={(event) => updateLine(index, (l) => switchLineType(l, event.target.value))}
               onRemove={() => removeLine(index)}
+              received={purchase?.status === 'received' ? purchase.lines[index] : null}
+              onViewAsset={setViewAsset}
             />
           ))}
         </Stack>
@@ -374,6 +389,19 @@ export default function PurchaseFormDialog({ open, purchaseId = null, onClose, o
         </DialogTitle>
         <DialogContent dividers>{content}</DialogContent>
         <DialogActions>
+          {canReceive ? (
+            <Tooltip title={unsaved ? 'Save your changes first: receiving uses the saved draft.' : ''}>
+              <span style={{ marginRight: 'auto' }}>
+                <Button
+                  variant="outlined"
+                  onClick={() => onReceive(purchase)}
+                  disabled={saving || unsaved}
+                >
+                  Receive…
+                </Button>
+              </span>
+            </Tooltip>
+          ) : null}
           <Button onClick={onClose} disabled={saving}>
             {readOnly || loadError ? 'Close' : 'Cancel'}
           </Button>
@@ -389,11 +417,31 @@ export default function PurchaseFormDialog({ open, purchaseId = null, onClose, o
           ) : null}
         </DialogActions>
       </form>
+      {viewAsset ? <AssetDetailsDialog open assetRef={viewAsset} onClose={() => setViewAsset(null)} /> : null}
     </Dialog>
   )
 }
 
-function LineRow({ index, line, errors, options, disabled, canRemove, onChange, onTypeChange, onRemove }) {
+// On a received purchase: "Received 2 of 3: AST-000001, AST-000002" (each ID opens the asset).
+function ReceivedInfo({ line, onViewAsset }) {
+  const assets = line.assets ?? []
+  return (
+    <Typography variant="body2" sx={{ mt: 0.5 }} data-testid={`line-received-${line.id}`}>
+      Received {line.received_quantity ?? 0} of {line.quantity}
+      {assets.length ? ': ' : ''}
+      {assets.map((a, i) => (
+        <span key={a.id}>
+          {i ? ', ' : ''}
+          <Link component="button" type="button" underline="hover" onClick={() => onViewAsset(a.asset_code)} sx={{ verticalAlign: 'baseline' }}>
+            {a.asset_code}
+          </Link>
+        </span>
+      ))}
+    </Typography>
+  )
+}
+
+function LineRow({ index, line, errors, options, disabled, canRemove, onChange, onTypeChange, onRemove, received, onViewAsset }) {
   const number = index + 1
   const isBulk = line.line_type === 'bulk'
   const lineTotal = lineTotalPaise(line)
@@ -537,6 +585,7 @@ function LineRow({ index, line, errors, options, disabled, canRemove, onChange, 
           </Typography>
         </>
       ) : null}
+      {received ? <ReceivedInfo line={received} onViewAsset={onViewAsset} /> : null}
     </Paper>
   )
 }
