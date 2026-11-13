@@ -87,9 +87,8 @@ def ensure_vendor_active(db: Session, vendor_id: int) -> Vendor:
     """Return the vendor if a NEW purchase may use it; otherwise raise.
 
     A deactivated vendor stays readable (list, get one, later its purchase
-    history) but cannot be used for new purchases. Not called anywhere yet:
-    Slice 3.1 (draft purchases) calls it when a purchase is created or its
-    vendor is changed.
+    history) but cannot be used for new purchases. Called by Slice 3.1 (draft
+    purchases) when a purchase is created or its vendor is changed (B45).
     """
     vendor = get_vendor(db, vendor_id)
     if not vendor.is_active:

@@ -210,6 +210,7 @@ def test_action_list_has_the_agreed_names():
         "employee.created", "employee.updated", "employee.activated", "employee.deactivated",  # Slice 2.2
         "vendor.created", "vendor.updated", "vendor.activated", "vendor.deactivated",  # Slice 2.3
         "category.created", "category.updated", "category.activated", "category.deactivated",  # Slice 2.1
+        "purchase.created", "purchase.updated",  # Slice 3.1
         "purchase.received", "purchase.cancelled", "asset.created",
         "asset.retired", "assignment.created", "assignment.returned", "stock.issued",
         "stock.adjusted",

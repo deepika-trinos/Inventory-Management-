@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     test_database_url: str | None = None
 
     # Comma-separated list of browser origins allowed by CORS.
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # Dates are stored in UTC and displayed in this timezone (decision Q11).
     # The backend always stores and returns UTC; screens convert for display.

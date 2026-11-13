@@ -82,22 +82,28 @@ def _ensure_name_free(db: Session, name: str, *, except_id: int | None = None) -
 
 
 def _category_in_use(db: Session, category: AssetCategory) -> bool:
-    """Is any stock item or asset using this category?
+    """Is any stock item, purchase line or asset using this category?
 
     - Slice 2.4: stock items count (any status: an inactive item still uses it).
+    - Slice 3.1: one-by-one purchase lines count, on purchases of ANY status (B46),
+      so a draft's serialized line can never end up in a by-quantity category.
     - Slice 3.2 (serialized assets): ADD a check on assets.category_id here.
     """
-    from app.modules.inventory.models import StockItem  # here, to avoid a circular import
+    # Imported here, to avoid a circular import.
+    from app.modules.inventory.models import StockItem
+    from app.modules.purchases.models import PurchaseLine
 
-    return db.scalar(select(StockItem.id).where(StockItem.category_id == category.id).limit(1)) is not None
+    if db.scalar(select(StockItem.id).where(StockItem.category_id == category.id).limit(1)) is not None:
+        return True
+    return db.scalar(select(PurchaseLine.id).where(PurchaseLine.category_id == category.id).limit(1)) is not None
 
 
 def ensure_category_selectable(db: Session, category_id: int) -> AssetCategory:
     """Return the category if it can be chosen for a NEW record; otherwise raise.
 
     A deactivated category stays readable (list / get one) but must not be
-    picked for new stock items or assets (BR-12). Not called anywhere yet:
-    Slice 2.4 (stock items) and Slice 3.1/3.2 (purchases, assets) call it.
+    picked for new stock items or assets (BR-12). Called by stock items (2.4)
+    and one-by-one purchase lines (3.1); Slice 3.2 (assets) will call it too.
     """
     category = get_category(db, category_id)
     if not category.is_active:
@@ -224,7 +230,7 @@ def update_category(
             raise AppError(
                 409,
                 "tracking_type_locked",
-                "The tracking type cannot be changed because items or assets already use this category.",
+                "The tracking type cannot be changed because stock items, purchases or assets already use this category.",
             )
         category.tracking_type = changes["tracking_type"]
         changed = True

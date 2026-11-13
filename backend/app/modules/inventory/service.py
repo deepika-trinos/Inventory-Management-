@@ -111,7 +111,8 @@ def _has_stock_history(db: Session, item: StockItem) -> bool:
 
 def ensure_stock_item_usable(db: Session, item_id: int) -> StockItem:
     """Return the item if NEW stock activity may use it (purchase lines 3.1,
-    issue 4.4, opening stock 4.5); otherwise raise. Not called anywhere yet."""
+    issue 4.4, opening stock 4.5); otherwise raise. Called by purchase lines
+    since Slice 3.1 (only for items newly added to a draft, B45)."""
     item = get_stock_item(db, item_id)
     if not item.is_active:
         raise AppError(409, "stock_item_inactive", f'Stock item "{item.name}" is deactivated.')

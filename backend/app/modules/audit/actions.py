@@ -36,6 +36,8 @@ class AuditAction:
     VENDOR_DEACTIVATED = "vendor.deactivated"  # Slice 2.3
 
     # Purchases
+    PURCHASE_CREATED = "purchase.created"  # Slice 3.1
+    PURCHASE_UPDATED = "purchase.updated"  # Slice 3.1
     PURCHASE_RECEIVED = "purchase.received"  # Slices 3.2-3.3
     PURCHASE_CANCELLED = "purchase.cancelled"  # Slice 3.1
 

@@ -16,6 +16,7 @@ from app.modules.categories.routes import router as categories_router
 from app.modules.employees.routes import router as employees_router
 from app.modules.health.routes import router as health_router
 from app.modules.inventory.routes import router as inventory_router
+from app.modules.purchases.routes import router as purchases_router
 from app.modules.users.routes import router as users_router
 from app.modules.vendors.routes import router as vendors_router
 
@@ -47,12 +48,13 @@ app = FastAPI(
         {"name": "employees", "description": "Employee records (Admin and IT Manager). Never deleted, only deactivated."},
         {"name": "vendors", "description": "Vendors (Admin and IT Manager). Never deleted, only deactivated."},
         {"name": "stock items", "description": "Items tracked by quantity (Admin and IT Manager). Never deleted, only deactivated."},
+        {"name": "purchases", "description": "Purchases (Admin and IT Manager). Drafts change no stock; never deleted, only cancelled."},
         {"name": "admin", "description": "Admin-only endpoints."},
         {"name": "health", "description": "Is the API and database working?"},
     ],
 )
 
-# CORS: browsers block a page on one address (the React app, :5173) from calling
+# CORS: browsers block a page on one address (the React app, :3000) from calling
 # an API on another address (:8000) unless the API lists that page's address here.
 app.add_middleware(
     CORSMiddleware,
@@ -74,4 +76,5 @@ api_router.include_router(categories_router)
 api_router.include_router(employees_router)
 api_router.include_router(vendors_router)
 api_router.include_router(inventory_router)
+api_router.include_router(purchases_router)
 app.include_router(api_router)

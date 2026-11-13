@@ -36,7 +36,7 @@ export const PAGES = [
   { path: '/inventory', label: 'Inventory', icon: Inventory2Outlined, roles: STAFF, slice: 'Phase 4' },
   { path: '/categories', label: 'Categories', icon: CategoryOutlined, roles: STAFF, slice: 'Slice 2.1' },
   { path: '/vendors', label: 'Vendors', icon: StorefrontOutlined, roles: STAFF, slice: 'Slice 2.3' },
-  { path: '/purchases', label: 'Purchases', icon: ShoppingCartOutlined, roles: STAFF, slice: 'Phase 3' },
+  { path: '/purchases', label: 'Purchases', icon: ShoppingCartOutlined, roles: STAFF, slice: 'Slice 3.1' },
   { path: '/employees', label: 'Employees', icon: BadgeOutlined, roles: STAFF, slice: 'Slice 2.2' },
   { path: '/assignments', label: 'Assignments', icon: AssignmentIndOutlined, roles: STAFF, slice: 'Phase 5' },
   { path: '/maintenance', label: 'Maintenance', icon: BuildOutlined, roles: STAFF, slice: 'Phase 6' },

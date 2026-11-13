@@ -11,9 +11,10 @@ what we own, where it is, who has it, and what needs attention.
 user management. **Phase 2 (Master data) complete and signed off (2026-11-12):** asset
 categories (2.1), employees (2.2; every Employee-role login is linked to an employee record),
 vendors (2.3) and bulk stock items (2.4). See
-[documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). Next: Phase 3 (Purchases); its
-open questions are decided (decisions.md section 13). Business pages not built yet show
-"Coming soon" until their phase.
+[documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). **Phase 3 (Purchases) in
+progress:** Slice 3.1 (draft purchases: create, edit, cancel; no stock change) is built and
+waiting for sign-off. Next: Slice 3.2 (receive one-by-one items). Business pages not built yet
+show "Coming soon" until their phase.
 
 ---
 
@@ -31,7 +32,7 @@ docker-compose.yml  Alternative local database using Docker
 How a request travels:
 
 ```
-Browser (React, :5173)  --HTTP-->  FastAPI (:8000)  --SQLAlchemy-->  PostgreSQL dev server (:5433)
+Browser (React, :3000)  --HTTP-->  FastAPI (:8000)  --SQLAlchemy-->  PostgreSQL dev server (:5433)
 ```
 
 The browser never talks to the database directly; everything goes through the API.
@@ -180,7 +181,8 @@ Expected: it runs each migration, for example `Running upgrade 0001 -> 0002, Rol
 Migration 0004 adds the `asset_categories` table (Slice 2.1). Migration 0005 completes the
 `employees` table (department, designation, phone; case-insensitive unique employee ID and work
 email) and keeps existing rows (Slice 2.2). Migration 0006 adds the `vendors` table (Slice 2.3). Migration 0007 adds the `stock_items` table
-(Slice 2.4).
+(Slice 2.4). Migration 0008 adds the `purchases` and `purchase_lines` tables and the
+`purchase_number_seq` sequence behind PUR-000001, PUR-000002, ... (Slice 3.1).
 
 Other useful Alembic commands (later slices):
 
@@ -255,6 +257,16 @@ Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 30). When that happen
 The tests use `TEST_DATABASE_URL` (never your dev database) and apply all migrations to it first.
 They refuse to run if `TEST_DATABASE_URL` is missing or the same as `DATABASE_URL`.
 
+Frontend tests (Vitest + React Testing Library, decision T1) run from the `frontend` folder:
+
+```powershell
+cd ..rontend
+npm test
+```
+
+They need no backend or database: the server is replaced by stand-ins. `npm run test:watch`
+re-runs them on every save.
+
 > Optional: "activating" the virtual environment (`.venv\Scripts\Activate.ps1`) lets you type
 > `alembic`, `pytest`, etc. without the `.venv\Scripts\` prefix. If PowerShell blocks the script,
 > just keep using the full `.venv\Scripts\...` form shown above.
@@ -278,7 +290,7 @@ copy .env.example .env
 npm run dev
 ```
 
-Open <http://localhost:5173>. You'll see the **Sign in** page. Log in with the Admin from step
+Open <http://localhost:3000>. You'll see the **Sign in** page. Log in with the Admin from step
 4.7 (or a test account). Each role sees its own menu:
 
 | Role | Menu |
@@ -289,13 +301,13 @@ Open <http://localhost:5173>. You'll see the **Sign in** page. Log in with the A
 
 Pages not built yet say **Coming soon**. The dashboard shows a green box,
 **"Backend: running · Database: reachable"**. A red box means the backend isn't running, or CORS
-isn't allowing `http://localhost:5173` (check `CORS_ORIGINS` in `backend\.env`).
+isn't allowing `http://localhost:3000` (check `CORS_ORIGINS` in `backend\.env`).
 
 **Staying logged in:** the login token is kept in the browser tab's *session storage*. Refreshing
 the page keeps you logged in; closing the tab logs you out; each new tab needs its own login.
 Tokens expire after 30 minutes, after which you're sent back to Sign in.
 
-**Component gallery (development only):** <http://localhost:5173/dev/components> lets you try
+**Component gallery (development only):** <http://localhost:3000/dev/components> lets you try
 the table, badges, form fields, confirm box, messages and date format. It isn't in the menu and
 isn't included in production builds.
 
@@ -333,9 +345,10 @@ is on.
 | `app/modules/health/` | `GET /health` (no table, so no `models.py`). |
 | `app/modules/auth/` | Login, `/me`, logout, plus `dependencies.py`: `get_current_user` and `require_roles(...)`, used to protect every endpoint. |
 | `app/modules/inventory/` | Items tracked **by quantity** (Slice 2.4): `/api/v1/stock-items` for Admin and IT Manager (list with name search and category/status filters; get, create, edit, activate/deactivate). Category must be an **active "by quantity" (bulk)** category; name unique within its category; fixed unit list; reorder threshold 0 or more. `quantity_on_hand` is read-only (only stock movements change it, from Slice 3.3). Deactivation only at zero stock. Never deleted. Every change audited. |
-| `app/modules/vendors/` | Vendors (Slice 2.3): `/api/v1/vendors` for Admin and IT Manager (list with search by name, contact person, email or phone and a status filter; get, create, edit, activate/deactivate). Only the name is required; names are unique ignoring case. Never deleted (BR-12, VEN-05). `ensure_vendor_active()` blocks inactive vendors for new purchases (used from Slice 3.1). Every change audited. |
+| `app/modules/vendors/` | Vendors (Slice 2.3): `/api/v1/vendors` for Admin and IT Manager (list with search by name, contact person, email or phone and a status filter; get, create, edit, activate/deactivate). Only the name is required; names are unique ignoring case. Never deleted (BR-12, VEN-05). `ensure_vendor_active()` blocks inactive vendors for new purchases (used by purchases since Slice 3.1). Every change audited. |
+| `app/modules/purchases/` | Purchases (Slice 3.1): `/api/v1/purchases` for Admin and IT Manager (list with search by reference number, vendor name or purchase number and status/vendor filters; get one with its lines; create a **draft**; edit or cancel a draft). Numbers PUR-000001... made by the system. Vendor, stock items and categories must be active; reference unique per vendor ignoring case (cancelled ones excepted); date not in the future; at least one line; line totals and the total calculated by the server. Drafts and cancelled purchases never change stock or create assets. No delete. Every change audited. Receiving: Slices 3.2 / 3.3. |
 | `app/modules/users/` | `roles` and `users` tables; Admin-only `/api/v1/users` endpoints (list, create, edit, role, activate/deactivate); safety rules (not yourself, last Admin); every change audited. |
-| `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once items/assets use the category (applies from Slices 2.4 / 3.2). Every change audited. |
+| `app/modules/categories/` | Asset categories (Slice 2.1): `/api/v1/categories` for Admin and IT Manager (list with search/filters, get, create, edit, activate/deactivate). Each is tracked **one-by-one** (`serialized`) or **by quantity** (`bulk`). Never deleted (BR-12). `ensure_category_selectable()` blocks inactive categories for new records (used from Slice 2.4); the tracking type locks once stock items, purchase lines or assets use the category (stock items from 2.4, purchase lines from 3.1, assets from 3.2). Every change audited. |
 | `app/modules/employees/` | Employees (Slice 2.2): `/api/v1/employees` for Admin and IT Manager (list with search by ID/name/department, filters by status, department and has-login; `/departments` for suggestions; get, create, edit, activate/deactivate). Never deleted (BR-12). Deactivating an employee also deactivates the linked login. Every change audited. |
 | `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
 | `app/modules/audit/` | Append-only audit log: `models.py` (table), `actions.py` (every action name), `service.py` (`audit.record(...)`: writes in the caller's transaction and strips secrets). |
@@ -363,7 +376,8 @@ is on.
 | Path | Purpose |
 |---|---|
 | `index.html`, `src/main.jsx` | Entry point: loads React, the theme, the router, notifications and login state. |
-| `vite.config.js` | Dev server settings (port 5173). |
+| `vite.config.js` | Dev server settings (port 3000) and the Vitest settings for `npm test`. |
+| `src/test/setup.js`, `src/**/*.test.js(x)` | Frontend tests (`npm test`, decision T1). Development only, never part of the build. |
 | `src/config.js` | Settings from `frontend/.env`: backend address and company timezone. |
 | `src/api/client.js` | One shared Axios instance: adds the login token to every call; on 401 clears it and returns to Sign in. |
 | `src/api/tokenStorage.js` | Where the token is kept (tab session storage) and why. |
@@ -379,15 +393,17 @@ is on.
 | `src/api/categories.js` | Calls to the category endpoints, plus the "One-by-one" / "By quantity" labels. |
 | `src/api/stockItems.js`, `src/pages/inventory/` | Inventory page (Admin and IT Manager): stock items with category, unit, reorder threshold and read-only quantity on hand; add/edit dialog whose category list shows only active "By quantity" categories; activate/deactivate with a confirm box. |
 | `src/api/vendors.js`, `src/pages/vendors/` | Vendors page (Admin and IT Manager): list, search, status filter, add/edit dialog, activate/deactivate with a confirm box; vendor detail page `/vendors/:id` with Edit/Deactivate and a **Purchase history** placeholder that Slice 3.4 fills in. |
+| `src/api/purchases.js`, `src/pages/purchases/` | Purchases page (Admin and IT Manager): list with search, status and vendor filters and status badges; **New purchase** / edit-draft form with an active-vendor picker, reference, date, notes and a lines list (each line "By quantity" with an active stock item, or "One-by-one" with an active one-by-one category and a description), quantity and unit cost in ₹, line totals and grand total; cancel a draft after a confirm box. Received/cancelled purchases open read-only. `purchaseForm.js` holds the form's checks and totals (tested in `purchaseForm.test.js` and `PurchaseFormDialog.test.jsx`). |
+| `src/utils/money.js` | Rupee amounts: reads them as whole paise (no rounding errors) and shows them as ₹1,23,456.00. |
 | `src/api/employees.js`, `src/pages/employees/` | Employees page (Admin and IT Manager): list, search, department/status filters, add/edit dialog with department suggestions, activate/deactivate with a confirm box that warns when a login will be deactivated too. |
 | `src/components/EmployeePicker.jsx` | Search-as-you-type picker of active employees without a login; used in the Users dialogs (required for the Employee role). |
 | `src/pages/categories/` | Categories page (Admin and IT Manager): list, search, filter, add/edit dialog, activate/deactivate with a confirm box. |
 | `src/components/DataTable.jsx` | Search box, server-side paging and sorting, loading/empty/error states. |
 | `src/components/FormField.jsx` | Text box with label, required `*` and error message. |
-| `src/components/StatusBadge.jsx` | Coloured status: asset statuses (Available, Assigned, Under Maintenance, Damaged, Retired) and record statuses (Active, Inactive). |
+| `src/components/StatusBadge.jsx` | Coloured status: asset statuses (Available, Assigned, Under Maintenance, Damaged, Retired) record statuses (Active, Inactive) and purchase statuses (Draft, Received, Cancelled). |
 | `src/components/ConfirmDialog.jsx` | "Are you sure?" box for consequential actions. |
 | `src/components/LoadingState.jsx`, `EmptyState.jsx`, `ErrorMessage.jsx` | Loading spinner, "nothing here yet" and error box with "Try again". |
-| `src/utils/dates.js` | `formatDateTime()` / `formatDate()`: show UTC times in the company timezone. |
+| `src/utils/dates.js` | `formatDateTime()` / `formatDate()`: show UTC times in the company timezone. `formatPlainDate()` shows a calendar date (e.g. a purchase date) as stored; `todayInCompanyTimezone()`. |
 | `src/theme.js` | Shared colours and fonts (MUI theme). |
 
 ---
@@ -400,7 +416,7 @@ is on.
 | `password authentication failed for user "itam_app"` or `database "itam_test" does not exist` | Run `scripts\dev-db init` (it adds anything missing). Check `.env` uses port `5433`, or copy `.env.example` to `.env` again. |
 | `scripts\dev-db start` says `Server did not start` | Read the last lines of `.dev-db\postgres.log`. Port 5433 may be in use by the Docker database (`docker compose down`). |
 | `failed to connect to the docker API` (option 2 only) | Docker Desktop isn't running. Start it and wait until it's ready. |
-| `Port 5173 is in use` | Another `npm run dev` is still running; close it. |
+| `Port 3000 is in use` | Another `npm run dev` is still running; close it. |
 | `pytest` exits with `TEST_DATABASE_URL is not set` | Add `TEST_DATABASE_URL` to `backend\.env`. |
 | Server won't start: `jwt_secret_key ... Field required` or `at least 32 characters` | Add a `JWT_SECRET_KEY` to `backend\.env` (step 4.4). |
 | `relation "users" does not exist` | Run the migrations: `.venv\Scripts\alembic upgrade head`. |
@@ -423,4 +439,11 @@ is on.
 | Users page shows **Needs employee link** | An Employee login created before Slice 2.2 without an employee record (R3). It still works; edit the user and pick the employee. |
 | Employees: `employee_code_taken` / `work_email_taken` | Another employee already has that employee ID or work email (upper/lower case is ignored). |
 | Employees: `cannot_change_self` | The employee record is linked to your own login, and deactivating it would lock you out. Ask another Admin. |
+| Purchases: `vendor_inactive` / `stock_item_inactive` / `category_inactive` | Only active vendors, stock items and categories can be chosen. When editing a draft, things already on it keep working even if deactivated since; only new choices are checked. |
+| Purchases: `category_not_serialized` | A "One-by-one" line needs a category tracked one by one (e.g. laptops). For mice, cables etc. use a "By quantity" line with the stock item. |
+| Purchases: `purchase_reference_taken` | This vendor already has a draft or received purchase with that invoice / reference number (upper/lower case ignored). A cancelled purchase does not count. |
+| Purchases: `purchase_date_in_future` | The purchase date must be today or earlier (company timezone). |
+| Purchases: `purchase_not_draft` | Only drafts can be edited or cancelled. Received and cancelled purchases are final (P6). |
+| Purchases: there is no Delete | On purpose (BR-12). Cancel the draft instead; it stays in the list as **Cancelled** and changes no stock. |
+| Categories: `tracking_type_locked` on a one-by-one category | Since Slice 3.1, a category used on any purchase line can't switch tracking type either. |
 | `create_user` says `--employee-code is required` | Employee logins need an employee record: add one on the Employees page, then pass its ID. |

@@ -2,6 +2,7 @@
 // status everywhere in the app.
 //   - Asset statuses (PRD 8.1): Available, Assigned, Under Maintenance, Damaged, Retired
 //   - Record statuses for master data (Slice 2.1+): Active, Inactive
+//   - Purchase statuses (Slice 3.1, PUR-04): Draft, Received, Cancelled
 import { Chip } from '@mui/material'
 
 const ASSET_COLORS = {
@@ -19,8 +20,15 @@ const RECORD_COLORS = {
   Inactive: 'default',
 }
 
-const COLORS = { ...ASSET_COLORS, ...RECORD_COLORS }
-const OUTLINED = new Set(['Retired', 'Inactive']) // "out of use" looks lighter
+// Purchases: a draft is waiting; received is done; cancelled is final and changed nothing.
+const PURCHASE_COLORS = {
+  Draft: 'warning',
+  Received: 'success',
+  Cancelled: 'default',
+}
+
+const COLORS = { ...ASSET_COLORS, ...RECORD_COLORS, ...PURCHASE_COLORS }
+const OUTLINED = new Set(['Retired', 'Inactive', 'Cancelled']) // "out of use" looks lighter
 
 export const ASSET_STATUSES = Object.keys(ASSET_COLORS)
 

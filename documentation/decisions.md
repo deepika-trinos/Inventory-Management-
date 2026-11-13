@@ -75,7 +75,19 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | pwdlib + Argon2 | Password hashing (stores a one-way scrambled fingerprint, never the password) | ✅ Approved (passlib + bcrypt **not** chosen) | 2026-11-10 | 1.3 |
 | PyJWT | Creates and checks JWT login tokens | ✅ Approved (python-jose **not** chosen) | 2026-11-10 | 1.3 |
 | httpx (testing only) | Required by FastAPI's test client to call the API inside tests | ✅ Approved with the Slice 1.2 sign-off | 2026-11-10 | 1.2 |
-| Vitest + React Testing Library (testing only) | Automatic tests for the screens (`npm test`); development only, never shipped to users | ✅ Approved (T1) | 2026-11-12 | Phase 3 (not installed yet) |
+| Vitest + React Testing Library (testing only) | Automatic tests for the screens (`npm test`); development only, never shipped to users | ✅ Approved (T1) | 2026-11-12 | 3.1 |
+
+**T1 as installed in Slice 3.1** (dev-only `devDependencies`, pinned to exact versions in
+`frontend/package.json`; B54, ✅ signed off with Slice 3.1 on 2026-11-13):
+
+| Package | Exact version | Why |
+|---|---|---|
+| `vitest` | 5.1.0 | The test runner (`npm test` = `vitest run`) |
+| `@testing-library/react` | 16.3.3 | Draws a screen in a test and finds things on it the way a user would |
+| `@testing-library/dom` | 10.4.2 | Required companion of `@testing-library/react` (it must be installed alongside) |
+| `jsdom` | 31.0.0 | The pretend browser page the tests run in (Vitest's `environment: 'jsdom'`) |
+
+Not installed (not needed yet): `@testing-library/jest-dom` and `@testing-library/user-event`.
 
 ---
 
@@ -96,7 +108,7 @@ None of these change the main stack fixed by the PRD (React.js, JavaScript, Pyth
 | Q12 | Hosting provider and domain | Slice 8.5 | Before Phase 8 starts |
 | R2 | **Temporary passwords:** must a user change the temporary password at first login? Is a "forgot / reset password" feature needed (the PRD has none)? Today the Admin hands over the password and the user keeps it. | Nothing in Phase 2; affects security review (Slice 8.3) | Before Slice 8.3 |
 
-**R1 is decided (see section 8). R3 is decided (see section 10). T1 is approved (see section 3). P1–P8 are decided (see section 13). Nothing OPEN blocks Phase 3.**
+**Slice 3.1 decisions B42–B54 are signed off (section 14).** R1 is decided (see section 8). R3 is decided (see section 10). T1 is approved (see section 3). P1–P8 are decided (see section 13). Nothing OPEN blocks Phase 3.**
 
 ---
 
@@ -216,3 +228,26 @@ Phase 3 questions from `Phase2_WrapUp.md`, **all accepted as proposed** by the o
 | P6 ✅ | **Who:** Admin and IT Manager may create, receive and cancel purchases. A **received purchase is final**: mistakes are corrected by a stock adjustment (4.4) or by retiring the asset (4.2). | 3.1–3.3 |
 | P7 ✅ | **Stock movement types:** `receipt`, `issue`, `adjustment_in`, `adjustment_out`, `opening`. | 3.3, 4.4, 4.5 |
 | P8 ✅ | **Vendors are never deleted** (BR-12), even ones without purchases. No change. | — |
+
+---
+
+## 14. Decisions in Slice 3.1 (✅ Slice 3.1 signed off by the owner, 2026-11-13; B42–B54 approved)
+
+B42, B43, B45 and B46 are the owner's answers given while building (2026-11-12). The others are
+technical or follow from P1–P6; all were **approved with the Slice 3.1 sign-off** (2026-11-13).
+
+| # | Decision | Why | Date | Slice |
+|---|---|---|---|---|
+| B42 | **System purchase number PUR-000001, PUR-000002, …** (owner's answer). Made by the database sequence `purchase_number_seq` when the purchase is saved; read-only; shown in lists, searchable, and recorded in the audit log. A save that fails after the number was taken leaves a gap (numbers are never reused). The vendor's invoice / reference number is kept separately. | Same style as asset IDs (Q3); gives every purchase an ID even when two vendors use the same invoice number. | 2026-11-12 | 3.1 |
+| B43 | **A cancelled purchase frees its invoice / reference number** (owner's answer): the P3 rule "unique per vendor, ignoring case" applies to draft and received purchases only (partial unique index). Spaces at the ends are removed. | A draft cancelled by mistake can be entered again. | 2026-11-12 | 3.1 |
+| B44 | **Technical limits:** reference 100 characters, notes 2,000, line description 200; quantity a whole number 1–100,000; unit cost 0 to 9,999,999,999.99 (NUMERIC 12,2); at most 100 lines per purchase. The API sends money as text with 2 decimals (`"1250.00"`) so nothing is rounded; it accepts a number or text. | Limits are technical, not from the PRD. | 2026-11-12 | 3.1 |
+| B45 | **Editing a draft checks only what changed** (owner's answer): the vendor is checked for being active only when it is changed; a line's stock item or category only when it was not already on the draft. Sending `lines` replaces all the draft's lines. Cancelling is always allowed, even if the vendor or items were deactivated since. **Whether receiving (3.2 / 3.3) re-checks them is for those slices to confirm.** | Matches the B33 note "checked when a purchase is created or its vendor is changed"; a deactivation never traps an existing draft. | 2026-11-12 | 3.1 (3.2, 3.3) |
+| B46 | **Purchase lines lock a category's tracking type** (owner's answer; extends B14): a one-by-one category used on any purchase line (any status, cancelled too) can no longer switch to "by quantity" (`tracking_type_locked`). | A draft's one-by-one line can never end up in a by-quantity category. | 2026-11-12 | 3.1 |
+| B47 | **Line shape (from P1):** a "by quantity" line has a stock item and **no** category or description (its name comes from the stock item); a "one-by-one" line has a category and a **required** description. The database enforces this and "exactly one of stock item / category" with check constraints. Errors: `invalid_line`, `category_not_serialized`, `stock_item_inactive`, `category_inactive`, each with `details.line` (1, 2, …) so the screen marks the right line. | P1; keeps the two inventory models apart (PRD 9.1–9.2). | 2026-11-12 | 3.1 |
+| B48 | **"Not in the future" uses the company timezone** (Q11): the purchase date is a calendar date (no time) and may be today or earlier in Asia/Kolkata. It is checked on create and when the date is changed. | Q11 / P3. Between midnight and 05:30 in India, UTC is still "yesterday": a UTC check would wrongly refuse today's date. | 2026-11-12 | 3.1 |
+| B49 | **Cancelling asks for no reason** and stores no extra columns: who cancelled and when are in the audit log (`purchase.cancelled`, with the whole purchase before and after). Nothing is deleted. | The PRD lists no cancel reason; BR-13 is met by the audit row. Confirmed with the Slice 3.1 sign-off: no reason needed. | 2026-11-12 | 3.1 |
+| B50 | **Purchase audit actions:** `purchase.created`, `purchase.updated` (only when something really changed), `purchase.cancelled` (already existed). Each records the vendor, reference, date, notes, status, the calculated total and every line (item, quantity, unit cost, line total). | BR-13, following B11. | 2026-11-12 | 3.1 |
+| B51 | **Ready for receiving (3.2 / 3.3), enforced now by the database:** `received_date` may only be set on a received purchase; `received_quantity` is empty or 0 to the ordered quantity (P4: lower allowed, never higher). Received purchases already refuse edit and cancel (`purchase_not_draft`). | P4 / P6; no receiving code exists yet. | 2026-11-12 | 3.1 (3.2, 3.3) |
+| B52 | **Screens:** the Purchases page lists purchases with search, status and vendor filters and Draft / Received / Cancelled badges (Draft orange, Received green, Cancelled grey outlined). New and edit use one form dialog (full screen on phones); a received or cancelled purchase opens in it read-only. The full purchase detail and history screens come in Slice 3.4. | Same dialog pattern as the other pages; 3.4 owns history (PUR-09). | 2026-11-12 | 3.1 (3.4) |
+| B53 | **Pickers load the first 100 active records by name** (vendors, stock items, one-by-one categories); the vendor filter lists the first 100 vendors (active and inactive). A note appears if there are more vendors. Switch to search-as-you-type (like `EmployeePicker`) if lists grow past that. | Simple and enough for company-size master data. | 2026-11-12 | 3.1 |
+| B54 | **Frontend tests (T1)** installed as dev-only packages at exact versions (section 3); `npm test` runs them once, `npm run test:watch` keeps watching. `jsdom` and `@testing-library/dom` are added because Vitest and React Testing Library need them. | T1 approved; exact versions requested by the owner. | 2026-11-12 | 3.1 |

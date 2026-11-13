@@ -17,6 +17,7 @@ import NotFoundPage from '../pages/NotFoundPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
+import PurchasesPage from '../pages/purchases/PurchasesPage'
 import UsersPage from '../pages/users/UsersPage'
 import VendorDetailPage from '../pages/vendors/VendorDetailPage'
 import VendorsPage from '../pages/vendors/VendorsPage'
@@ -34,6 +35,7 @@ const BUILT_PAGES = {
   '/categories': CategoriesPage,
   '/employees': EmployeesPage,
   '/inventory': InventoryPage,
+  '/purchases': PurchasesPage,
   '/users': UsersPage,
   '/vendors': VendorsPage,
 }
