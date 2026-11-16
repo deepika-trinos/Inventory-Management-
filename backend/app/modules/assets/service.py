@@ -4,7 +4,8 @@
 RULES (AST-01, AST-02, AST-06, BR-01, P5)
 - The asset ID (AST-000001, ...) is made by the database sequence: never typed.
 - Serial number and model are required; brand, warranty expiry and location
-  (typed text, Q1) are optional. Text is trimmed; empty optional text is stored as empty (NULL).
+  (typed text, Q1) are optional. Warranty expiry, when given, is not before the
+  purchase date (B61). Text is trimmed; empty optional text is stored as empty (NULL).
 - Serial numbers are unique across ALL assets ignoring case. The service checks
   first to give a clear error; the unique index uq_assets_serial_number_lower is
   the final guard when two receipts are saved at the same moment.
@@ -12,6 +13,7 @@ RULES (AST-01, AST-02, AST-06, BR-01, P5)
 """
 
 from collections.abc import Iterable
+from datetime import date
 from typing import Any
 
 from sqlalchemy import func, select
@@ -102,12 +104,25 @@ def _text(value: str | None, *, required: bool, max_length: int, code: str, labe
     return value
 
 
-def clean_unit(data: dict[str, Any], *, default_name: str | None = None) -> dict[str, Any]:
+def clean_unit(
+    data: dict[str, Any], *, default_name: str | None = None, purchase_date: date | None = None
+) -> dict[str, Any]:
     """Check and tidy the typed-in details of ONE asset (P5).
 
+    Warranty expiry is optional, but when given it cannot be before the purchase
+    date (B61): "2019" typed for "2029" is caught.
+
     Errors: 422 `invalid_serial_number`, `invalid_model`, `invalid_asset_name`,
-    `invalid_brand`, `invalid_location`. The caller adds where the unit is (line / unit).
+    `invalid_brand`, `invalid_location`, `invalid_warranty_expiry`.
+    The caller adds where the unit is (line / unit).
     """
+    warranty_expiry = data.get("warranty_expiry")
+    if warranty_expiry is not None and purchase_date is not None and warranty_expiry < purchase_date:
+        raise AppError(
+            422,
+            "invalid_warranty_expiry",
+            f"The warranty expiry cannot be before the purchase date ({purchase_date.isoformat()}).",
+        )
     name = _text(data.get("name"), required=False, max_length=NAME_MAX_LENGTH, code="invalid_asset_name", label="asset name")
     name = name or _text(default_name, required=True, max_length=NAME_MAX_LENGTH, code="invalid_asset_name", label="asset name")
     return {
@@ -121,7 +136,7 @@ def clean_unit(data: dict[str, Any], *, default_name: str | None = None) -> dict
         "location": _text(
             data.get("location"), required=False, max_length=LOCATION_MAX_LENGTH, code="invalid_location", label="location"
         ),
-        "warranty_expiry": data.get("warranty_expiry"),
+        "warranty_expiry": warranty_expiry,
     }
 
 

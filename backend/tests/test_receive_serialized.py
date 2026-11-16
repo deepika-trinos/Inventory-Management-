@@ -389,28 +389,6 @@ def test_cancelled_purchase_cannot_be_received(client, manager, data):
     assert all_assets() == []
 
 
-def test_purchase_with_bulk_lines_is_refused_until_slice_3_3(client, manager, data):
-    _, headers = manager
-    purchase = create(client, headers, data).json()  # laptops + mice
-    stock_before = stock_tables_snapshot()
-    body = {
-        "received_date": _today().isoformat(),
-        "lines": [
-            {"line_id": purchase["lines"][0]["id"], "received_quantity": 1, "units": [unit("S-1")]},
-            {"line_id": purchase["lines"][1]["id"], "received_quantity": 10, "units": []},
-        ],
-    }
-
-    response = receive(client, headers, purchase, body)
-
-    assert response.status_code == 409
-    assert error_code(response) == "bulk_receiving_unavailable"
-    assert response.json()["error"]["details"] == {"lines": [2]}
-    assert "Slice 3.3" in response.json()["error"]["message"]
-    assert_nothing_saved(purchase)
-    assert stock_tables_snapshot() == stock_before
-
-
 def test_draft_can_be_received_after_its_vendor_and_category_were_deactivated(client, manager, data, db):
     _, headers = manager
     purchase = laptops_only(client, headers, data, quantity=1)
@@ -686,3 +664,34 @@ def test_database_rejects_unknown_status_blank_serial_and_negative_cost(db, data
             db.commit()
         db.rollback()
     assert db.execute(text("SELECT count(*) FROM assets")).scalar_one() == 0
+
+
+# ---- B61: warranty expiry is optional, but not before the purchase date -----------------------
+def test_warranty_expiry_before_the_purchase_date_is_rejected(client, manager, data):
+    _, headers = manager
+    bought = _today() - timedelta(days=10)
+    purchase = laptops_only(client, headers, data, quantity=2, purchase_date=bought.isoformat())
+    too_early = (bought - timedelta(days=1)).isoformat()
+
+    response = receive(
+        client, headers, purchase,
+        receipt(purchase, [unit("S-1"), unit("S-2", warranty_expiry=too_early)]),
+    )
+
+    assert response.status_code == 422 and error_code(response) == "invalid_warranty_expiry"
+    assert response.json()["error"]["details"] == {"line": 1, "unit": 2}
+    assert_nothing_saved(purchase)
+
+
+def test_warranty_expiry_on_the_purchase_date_or_empty_is_fine(client, manager, data):
+    _, headers = manager
+    bought = _today() - timedelta(days=10)
+    purchase = laptops_only(client, headers, data, quantity=2, purchase_date=bought.isoformat())
+
+    response = receive(
+        client, headers, purchase,
+        receipt(purchase, [unit("S-1", warranty_expiry=bought.isoformat()), unit("S-2")]),
+    )
+
+    assert response.status_code == 200, response.text
+    assert [a.warranty_expiry for a in all_assets()] == [bought, None]

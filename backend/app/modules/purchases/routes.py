@@ -129,7 +129,7 @@ def cancel_purchase(
 @router.post(
     "/{purchase_id}/receive",
     response_model=PurchaseRead,
-    summary="Receive a draft purchase (one-by-one items)",
+    summary="Receive a draft purchase (one-by-one and by-quantity items)",
     responses=error_responses(404, 409, 422),
 )
 def receive_purchase(
@@ -140,19 +140,22 @@ def receive_purchase(
     db: Session = Depends(get_db),
 ) -> Purchase:
     """Receive a **draft** purchase in one step: the received date, and for every line the
-    received quantity (0 to ordered, P4) with the details of each unit. Each unit becomes
-    an **asset** (AST-000001 ..., status Available). The purchase becomes **received** (final).
-    Everything is saved together or not at all. The new asset IDs are in `lines[].assets`.
+    received quantity (0 to ordered, P4). One-by-one line: the details of each unit; each
+    unit becomes an **asset** (AST-000001 ..., status Available). By-quantity line: no unit
+    details; the stock item's balance goes up by the received quantity, with one `receipt`
+    stock movement. The purchase becomes **received** (final). Everything is saved together
+    or not at all. The new asset IDs are in `lines[].assets`.
 
-    - Not a draft: **409** `purchase_not_draft`; has by-quantity lines (until Slice 3.3):
-      **409** `bulk_receiving_unavailable`
+    - Not a draft: **409** `purchase_not_draft`; a by-quantity line's stock item is
+      deactivated and stock would arrive: **409** `stock_item_inactive` (`details.line`)
     - Same serial twice in this receipt: **409** `serial_number_duplicate`; used by an
       existing asset (any case): **409** `serial_number_taken`
     - Dates: **422** `received_date_in_future`, `received_date_before_purchase`
     - Lines: **422** `invalid_receipt_line`, `receipt_line_missing`, `received_quantity_too_high`,
-      `unit_count_mismatch`, `nothing_received`, `too_many_units`
+      `unit_count_mismatch`, `units_not_allowed`, `nothing_received`, `too_many_units`
     - Units: **422** `invalid_serial_number`, `invalid_model`, `invalid_asset_name`,
-      `invalid_brand`, `invalid_location` (with `details.line` and `details.unit`)
+      `invalid_brand`, `invalid_location`, `invalid_warranty_expiry` (with `details.line`
+      and `details.unit`)
     - Writes audit actions `purchase.received` and one `asset.created` per asset.
     """
     purchase = service.get_purchase(db, purchase_id, lock=True)  # two people cannot receive it at once

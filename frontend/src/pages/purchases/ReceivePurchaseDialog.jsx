@@ -1,14 +1,16 @@
-// Receive a draft purchase of one-by-one items (Slice 3.2, PUR-05, PUR-06, BR-07, BR-08).
+// Receive a draft purchase (Slices 3.2-3.3, PUR-05 to PUR-07, BR-07, BR-08, INV-03).
 //
-// One step for the whole purchase (B55):
+// One step for the whole purchase, one-by-one and by-quantity lines mixed (B55):
 //   - the received date (not before the purchase date, not in the future);
 //   - for every line, how many arrived (0 to ordered, P4: fewer closes the line);
-//   - one row per unit: serial number and model required; name (defaults to the
-//     line's description), brand, warranty expiry and location optional (P5).
+//   - one-by-one line: one row per unit: serial number and model required; name
+//     (defaults to the line's description), brand, warranty expiry (not before the
+//     purchase date, B61) and location optional (P5);
+//   - by-quantity line: the quantity only, with the stock now and after (C8).
 // A confirm box comes first (PRD 13). Then each unit becomes an asset with a new
-// asset ID, and the purchase is Received (final, P6). Everything is saved together
-// or not at all: one bad row (e.g. a serial number already used) saves nothing.
-// A purchase with by-quantity lines cannot be received until Slice 3.3 (B56).
+// asset ID, each by-quantity line raises its stock item's balance, and the purchase
+// is Received (final, P6). Everything is saved together or not at all: one bad row
+// (e.g. a serial number already used) saves nothing.
 import { useEffect, useMemo, useState } from 'react'
 import ContentCopyOutlined from '@mui/icons-material/ContentCopyOutlined'
 import {
@@ -43,15 +45,17 @@ import LoadingState from '../../components/LoadingState'
 import { formatPlainDate, todayInCompanyTimezone } from '../../utils/dates'
 import {
   BRAND_MAX,
-  bulkLineNumbers,
   copyFirstUnitToAll,
   LOCATION_MAX,
   MODEL_MAX,
   NAME_MAX,
   parseReceived,
+  quantityWithUnit,
+  receiptSummary,
   receiptValuesFromPurchase,
   SERIAL_MAX,
   setReceivedQuantity,
+  stockLinesAdded,
   toReceivePayload,
   totalUnits,
   validateReceipt,
@@ -66,9 +70,16 @@ const UNIT_FIELD_FOR_CODE = {
   invalid_asset_name: 'name',
   invalid_brand: 'brand',
   invalid_location: 'location',
+  invalid_warranty_expiry: 'warranty_expiry',
 }
 // Server errors about a line's received quantity (details.line).
-const LINE_CODES = new Set(['received_quantity_too_high', 'unit_count_mismatch', 'receipt_line_missing'])
+const LINE_CODES = new Set([
+  'received_quantity_too_high',
+  'unit_count_mismatch',
+  'receipt_line_missing',
+  'units_not_allowed',
+  'stock_item_inactive',
+])
 const DATE_CODES = new Set(['received_date_in_future', 'received_date_before_purchase'])
 
 const UNIT_COLUMNS = [
@@ -80,10 +91,17 @@ const UNIT_COLUMNS = [
   { field: 'location', label: 'Location', max: LOCATION_MAX, minWidth: 180 },
 ]
 
-export const receiveConfirmMessage = (count, short) =>
-  `This creates ${count} ${count === 1 ? 'asset' : 'assets'}, each with a new asset ID and status Available, ` +
-  'and marks the purchase Received. Receiving is final: the purchase can no longer be edited or cancelled.' +
-  (short ? ' Lines with fewer units than ordered are closed: the missing units will not be received later.' : '')
+export const receiveConfirmMessage = (count, stockLines, short) => {
+  const parts = []
+  if (count) parts.push(`creates ${count} ${count === 1 ? 'asset' : 'assets'}, each with a new asset ID and status Available`)
+  if (stockLines)
+    parts.push(`adds the received quantities to stock on ${stockLines} by-quantity ${stockLines === 1 ? 'line' : 'lines'}`)
+  return (
+    `This ${parts.join(', ')}, and marks the purchase Received. ` +
+    'Receiving is final: the purchase can no longer be edited or cancelled.' +
+    (short ? ' Lines with fewer units than ordered are closed: the missing units will not be received later.' : '')
+  )
+}
 
 export default function ReceivePurchaseDialog({ open, purchaseId, onClose, onReceived }) {
   const theme = useTheme()
@@ -113,8 +131,7 @@ export default function ReceivePurchaseDialog({ open, purchaseId, onClose, onRec
     }
   }, [purchaseId, attempt, today])
 
-  const bulkLines = purchase ? bulkLineNumbers(purchase) : []
-  const canReceive = Boolean(purchase && purchase.status === 'draft' && bulkLines.length === 0)
+  const canReceive = Boolean(purchase && purchase.status === 'draft')
 
   const clearLineErrors = (index) => {
     setErrors((e) => {
@@ -193,6 +210,7 @@ export default function ReceivePurchaseDialog({ open, purchaseId, onClose, onRec
   }
 
   const count = values ? totalUnits(values) : 0
+  const stockLines = values ? stockLinesAdded(values) : 0
   const short = values ? values.lines.some((line) => (parseReceived(line) ?? line.ordered) < line.ordered) : false
 
   let content
@@ -211,12 +229,6 @@ export default function ReceivePurchaseDialog({ open, purchaseId, onClose, onRec
         {purchase.status !== 'draft' ? (
           <Alert severity="info" sx={{ mb: 2 }}>
             Only a draft purchase can be received. {purchase.purchase_number} is {purchase.status}.
-          </Alert>
-        ) : null}
-        {purchase.status === 'draft' && bulkLines.length ? (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            This purchase has by-quantity {bulkLines.length === 1 ? 'line' : 'lines'} ({bulkLines.map((n) => `line ${n}`).join(', ')}).
-            Receiving by-quantity items arrives in Slice 3.3, so this purchase cannot be received yet.
           </Alert>
         ) : null}
         {formError ? (
@@ -272,7 +284,7 @@ export default function ReceivePurchaseDialog({ open, purchaseId, onClose, onRec
         <DialogActions>
           {canReceive ? (
             <Typography variant="body2" color="text.secondary" sx={{ mr: 'auto', pl: 1 }} data-testid="receive-count">
-              {count} {count === 1 ? 'asset' : 'assets'} will be created
+              {receiptSummary(values)}
             </Typography>
           ) : null}
           <Button onClick={onClose}>{canReceive ? 'Cancel' : 'Close'}</Button>
@@ -287,7 +299,7 @@ export default function ReceivePurchaseDialog({ open, purchaseId, onClose, onRec
       <ConfirmDialog
         open={confirming}
         title={`Receive ${purchase?.purchase_number ?? ''}?`}
-        message={receiveConfirmMessage(count, short)}
+        message={receiveConfirmMessage(count, stockLines, short)}
         confirmLabel="Receive"
         cancelLabel="Go back"
         onCancel={() => setConfirming(false)}
@@ -304,11 +316,25 @@ function ReceiveLine({ line, errors, onQuantityChange, onUnitChange, onCopyFirst
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: 'flex-start' } }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1" component="h3">
-            Line {line.number}: {line.description}
+            Line {line.number}: {line.bulk ? line.stockItem : line.description}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {line.category} · Ordered: {line.ordered}
+            {line.bulk
+              ? `By quantity · Ordered: ${quantityWithUnit(line.ordered, line.unit)}`
+              : `${line.category} · Ordered: ${line.ordered}`}
           </Typography>
+          {line.bulk ? (
+            <Typography variant="body2" sx={{ mt: 0.5 }} data-testid={`stock-preview-${line.number}`}>
+              In stock now: {quantityWithUnit(line.inStock, line.unit)}
+              {received !== null ? ` · after receiving: ${quantityWithUnit(line.inStock + received, line.unit)}` : ''}
+            </Typography>
+          ) : null}
+          {line.bulk && !line.itemActive ? (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              This stock item is deactivated, so stock cannot be added to it. Reactivate it on the Inventory
+              page first, or enter 0.
+            </Alert>
+          ) : null}
         </Box>
         <Box sx={{ width: { xs: '100%', sm: 220 } }}>
           <FormField
@@ -327,7 +353,7 @@ function ReceiveLine({ line, errors, onQuantityChange, onUnitChange, onCopyFirst
 
       {received === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Nothing arrived for this line. It will be closed with 0 received.
+          Nothing arrived for this line. It will be closed with 0 received{line.bulk ? ' and no stock is added' : ''}.
         </Typography>
       ) : null}
 

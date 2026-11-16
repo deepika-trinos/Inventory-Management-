@@ -428,6 +428,7 @@ function ReceivedInfo({ line, onViewAsset }) {
   return (
     <Typography variant="body2" sx={{ mt: 0.5 }} data-testid={`line-received-${line.id}`}>
       Received {line.received_quantity ?? 0} of {line.quantity}
+      {line.line_type === 'bulk' && line.stock_item ? ` ${unitLabel(line.stock_item.unit_of_measure).toLowerCase()} (added to stock)` : ''}
       {assets.length ? ': ' : ''}
       {assets.map((a, i) => (
         <span key={a.id}>

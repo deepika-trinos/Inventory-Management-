@@ -1,14 +1,16 @@
-// Tests for the receiving form logic (Slice 3.2): starting values, unit rows that
-// follow the received quantity, copy-down, checks (incl. duplicate serials), the
-// request body and the success message. Run with: npm test
+// Tests for the receiving form logic (Slices 3.2-3.3): starting values, unit rows that
+// follow the received quantity, copy-down, checks (incl. duplicate serials, warranty
+// date, deactivated stock items), by-quantity lines, the request body and the success
+// message. Run with: npm test
 import { describe, expect, it } from 'vitest'
 
 import {
-  bulkLineNumbers,
   copyFirstUnitToAll,
+  receiptSummary,
   receiptValuesFromPurchase,
   receivedMessage,
   setReceivedQuantity,
+  stockLinesAdded,
   toReceivePayload,
   totalUnits,
   validateReceipt,
@@ -46,9 +48,66 @@ describe('receiptValuesFromPurchase', () => {
     expect(totalUnits(values)).toBe(4)
   })
 
-  it('finds by-quantity lines (received in Slice 3.3)', () => {
-    expect(bulkLineNumbers(PURCHASE)).toEqual([])
-    expect(bulkLineNumbers({ lines: [...PURCHASE.lines, { id: 13, line_type: 'bulk' }] })).toEqual([3])
+})
+
+// A mixed purchase: 3 laptops and 10 mice (15 already in stock).
+const MOUSE = { id: 7, name: 'USB mouse', unit_of_measure: 'pieces', status: 'active', quantity_on_hand: 15 }
+const MIXED = {
+  ...PURCHASE,
+  lines: [PURCHASE.lines[0], { id: 13, line_type: 'bulk', stock_item: MOUSE, quantity: 10 }],
+}
+function mixedFilled() {
+  const values = receiptValuesFromPurchase(MIXED, TODAY)
+  values.lines[0].units = values.lines[0].units.map((u, i) => ({ ...u, serial_number: `SN-${i + 1}`, model: 'Latitude' }))
+  return values
+}
+
+describe('by-quantity lines', () => {
+  it('start with the ordered quantity, no unit rows and the current stock', () => {
+    const line = receiptValuesFromPurchase(MIXED, TODAY).lines[1]
+    expect(line).toMatchObject({ bulk: true, stockItem: 'USB mouse', unit: 'pieces', inStock: 15, itemActive: true, ordered: 10, received_quantity: '10', units: [] })
+  })
+
+  it('never get unit rows when the quantity changes', () => {
+    const line = receiptValuesFromPurchase(MIXED, TODAY).lines[1]
+    expect(setReceivedQuantity(line, '4')).toMatchObject({ received_quantity: '4', units: [] })
+  })
+
+  it('count as stock, not as assets', () => {
+    const values = mixedFilled()
+    expect(totalUnits(values)).toBe(3)
+    expect(stockLinesAdded(values)).toBe(1)
+    expect(receiptSummary(values)).toBe('3 assets will be created · stock added on 1 line')
+    values.lines[1] = setReceivedQuantity(values.lines[1], '0')
+    expect(stockLinesAdded(values)).toBe(0)
+    expect(receiptSummary(values)).toBe('3 assets will be created')
+  })
+
+  it('a receipt of by-quantity lines only creates no assets', () => {
+    const values = receiptValuesFromPurchase({ ...MIXED, lines: [MIXED.lines[1]] }, TODAY)
+    expect(receiptSummary(values)).toBe('stock added on 1 line')
+    expect(validateReceipt(values, { purchaseDate: PURCHASE.purchase_date, today: TODAY })).toEqual({})
+  })
+
+  it('are checked: whole number from 0 to ordered', () => {
+    const values = mixedFilled()
+    values.lines[1] = setReceivedQuantity(values.lines[1], '11')
+    expect(check(values).lines[1].received_quantity).toBe('Only 10 ordered. More than ordered is not allowed.')
+  })
+
+  it('cannot add stock to a deactivated stock item, but 0 is fine (C5)', () => {
+    const values = receiptValuesFromPurchase(
+      { ...MIXED, lines: [PURCHASE.lines[0], { ...MIXED.lines[1], stock_item: { ...MOUSE, status: 'inactive' } }] },
+      TODAY,
+    )
+    values.lines[0].units = values.lines[0].units.map((u, i) => ({ ...u, serial_number: `SN-${i + 1}`, model: 'L' }))
+    expect(check(values).lines[1].received_quantity).toMatch(/deactivated/)
+    values.lines[1] = setReceivedQuantity(values.lines[1], '0')
+    expect(check(values)).toEqual({})
+  })
+
+  it('need no unit details in the request body', () => {
+    expect(toReceivePayload(mixedFilled()).lines[1]).toEqual({ line_id: 13, received_quantity: 10, units: [] })
   })
 })
 
@@ -135,6 +194,15 @@ describe('validateReceipt', () => {
     expect(check({ ...values, received_date: '2026-11-10' })).toEqual({})
   })
 
+  it('refuses a warranty expiry before the purchase date, but allows the same day or empty (B61)', () => {
+    const values = filled()
+    values.lines[0].units[0].warranty_expiry = '2026-11-09'
+    values.lines[0].units[1].warranty_expiry = '2026-11-10'
+    const errors = check(values)
+    expect(errors.lines[0].units[0]).toEqual({ warranty_expiry: 'Cannot be before the purchase date.' })
+    expect(errors.lines[0].units[1]).toEqual({})
+  })
+
   it('checks the length of the optional text fields', () => {
     const values = filled()
     values.lines[0].units[0].brand = 'x'.repeat(101)
@@ -186,5 +254,18 @@ describe('receivedMessage', () => {
 
   it('shortens a long list', () => {
     expect(receivedMessage(received(12), 2)).toBe('PUR-000005 received: 12 assets created (AST-000001, AST-000002 and 10 more).')
+  })
+
+  it('lists the stock added by by-quantity lines', () => {
+    const mixed = {
+      purchase_number: 'PUR-000005',
+      lines: [
+        { line_type: 'serialized', assets: [{ asset_code: 'AST-000001' }] },
+        { line_type: 'bulk', stock_item: MOUSE, received_quantity: 10, assets: [] },
+        { line_type: 'bulk', stock_item: { name: 'HDMI cable', unit_of_measure: 'boxes' }, received_quantity: 0, assets: [] },
+      ],
+    }
+    expect(receivedMessage(mixed)).toBe('PUR-000005 received: 1 asset created (AST-000001); stock added: USB mouse +10 pieces.')
+    expect(receivedMessage({ ...mixed, lines: mixed.lines.slice(1) })).toBe('PUR-000005 received: stock added: USB mouse +10 pieces.')
   })
 })

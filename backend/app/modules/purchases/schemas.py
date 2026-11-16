@@ -56,6 +56,7 @@ class StockItemSummary(BaseModel):
     name: str
     unit_of_measure: str
     status: str
+    quantity_on_hand: int = Field(description="The item's CURRENT balance (shown when receiving, Slice 3.3).")
 
 
 class CategorySummary(BaseModel):
@@ -184,7 +185,8 @@ class ReceiveUnitIn(BaseModel):
 
 class ReceiveLineIn(BaseModel):
     """What arrived for one purchase line. received_quantity: 0 to the ordered
-    quantity (P4); send exactly that many units."""
+    quantity (P4). One-by-one line: send exactly that many units. By-quantity
+    line: send no units."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -211,7 +213,8 @@ class PurchaseReceive(BaseModel):
                                  "warranty_expiry": "2029-11-13", "location": "Bengaluru office, IT store"},
                                 {"serial_number": "SN-1002", "model": "Latitude 5440", "brand": "Dell"},
                             ],
-                        }
+                        },
+                        {"line_id": 2, "received_quantity": 10},
                     ],
                 }
             ]

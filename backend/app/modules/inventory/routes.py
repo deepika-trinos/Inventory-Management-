@@ -103,7 +103,7 @@ def update_stock_item(
 ) -> StockItem:
     """Send only the fields to change: name, category_id, unit_of_measure,
     reorder_threshold. A new category must be an active bulk category.
-    The unit locks once the item has stock (**409** `unit_locked`, from Slice 3.3).
+    The unit locks once the item has any stock movement (**409** `unit_locked`, B36).
     Writes audit action `stock_item.updated` when something changed."""
     item = service.get_stock_item(db, item_id)
     changes = body.model_dump(exclude_unset=True)

@@ -1,8 +1,9 @@
-"""Stock items: list, get, create, edit, activate/deactivate (Slice 2.4, INV-01).
+"""Stock items: list, get, create, edit, activate/deactivate (Slice 2.4, INV-01),
+and stock movements (Slice 3.3, INV-03, INV-05, INV-07, BR-09, BR-10).
 
-Used by the /stock-items endpoints (Admin and IT Manager). Later: purchases
-(3.1, 3.3), stock issue/adjust (4.4) and opening stock (4.5) call
-ensure_stock_item_usable() and change quantity_on_hand through movements.
+Used by the /stock-items endpoints (Admin and IT Manager). Purchases (3.1, 3.3),
+stock issue/adjust (4.4) and opening stock (4.5) call ensure_stock_item_usable(),
+lock_stock_items() and record_movement(): the ONLY way quantity_on_hand changes.
 
 Every change writes an audit row in the SAME transaction (BR-13, B11).
 
@@ -11,28 +12,36 @@ RULES
   ACTIVE when chosen (on create, or when the category is changed):
   errors category_not_bulk / category_inactive.
 - Name is unique within its category, ignoring upper/lower case.
-- quantity_on_hand is never set here: it starts at 0 and only stock movements
-  change it (Slices 3.3, 4.4, 4.5).
-- The unit of measure locks once the item has stock history (B36); the guard
-  starts to apply from Slice 3.3 (see _has_stock_history).
+- quantity_on_hand is never set by create / edit: it starts at 0 and only
+  record_movement() changes it, together with a movement row (B39).
+- Stock never goes below 0 (INV-07, BR-10): `insufficient_stock` (C7).
+- The unit of measure locks once the item has stock history: any movement, or
+  stock on hand (B36).
 - BR-12: never deleted. Deactivation only at zero stock (B38).
 """
 
+from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
-from app.core.text import required_text
+from app.core.text import optional_text, required_text
 from app.modules.audit import service as audit
 from app.modules.audit.actions import AuditAction
 from app.modules.audit.service import AuditContext
 from app.modules.categories import service as categories_service
 from app.modules.categories.models import AssetCategory, TrackingType
-from app.modules.inventory.models import StockItem, StockItemStatus
+from app.modules.inventory.models import (
+    REASON_MAX_LENGTH,
+    MovementType,
+    StockItem,
+    StockItemStatus,
+    StockMovement,
+)
 from app.modules.users.models import User
 
 # What the audit log records about a stock item (category by id and name).
@@ -98,15 +107,11 @@ def _ensure_name_free(db: Session, category_id: int, name: str, *, except_id: in
 
 
 def _has_stock_history(db: Session, item: StockItem) -> bool:
-    """Has this item ever had stock? Locks the unit of measure (B36).
-
-    NOTE: there are no stock movements yet, so quantity_on_hand is always 0 and
-    this returns False: the unit lock does not apply yet. It STARTS TO APPLY in
-    Slice 3.3, which adds the stock_movements table: add "or any movement exists
-    for this item" here.
-    """
-    _ = db
-    return item.quantity_on_hand > 0
+    """Has this item ever had stock? Locks the unit of measure (B36): any stock
+    movement (even if the balance is back to 0), or stock on hand."""
+    if item.quantity_on_hand > 0:
+        return True
+    return bool(db.scalar(select(exists().where(StockMovement.stock_item_id == item.id))))
 
 
 def ensure_stock_item_usable(db: Session, item_id: int) -> StockItem:
@@ -249,8 +254,8 @@ def set_active(
 ) -> StockItem:
     """Activate or deactivate (audit: stock_item.activated / stock_item.deactivated).
 
-    Never deletes (BR-12). Deactivation only at zero stock (B38): with no stock
-    movements yet (until Slice 3.3) the quantity is always 0, so it never triggers.
+    Never deletes (BR-12). Deactivation only at zero stock (B38): received stock
+    must be issued or adjusted to 0 first (Slice 4.4).
     Activating does not check the category: the item keeps the category it has.
     """
     new_status = StockItemStatus.ACTIVE if active else StockItemStatus.INACTIVE
@@ -267,3 +272,86 @@ def set_active(
     item.status = new_status
     action = AuditAction.STOCK_ITEM_ACTIVATED if active else AuditAction.STOCK_ITEM_DEACTIVATED
     return _save(db, actor=actor, action=action, item=item, before=before, context=context)
+
+
+# ---- Stock movements (Slice 3.3) --------------------------------------------------
+def lock_stock_items(db: Session, item_ids: set[int] | list[int]) -> dict[int, StockItem]:
+    """Lock these stock items' rows until commit (SELECT ... FOR UPDATE) and reload
+    their CURRENT balances. Rows are locked in id order, so two receipts touching
+    the same items wait for each other instead of deadlocking. Call this before
+    record_movement() so two people changing the same item's stock at the same
+    moment cannot lose an update."""
+    ids = sorted(set(item_ids))
+    if not ids:
+        return {}
+    found = list(db.scalars(select(StockItem.id).where(StockItem.id.in_(ids)).order_by(StockItem.id).with_for_update()))
+    if len(found) != len(ids):
+        raise AppError(404, "stock_item_not_found", "Stock item not found.")
+    items = db.scalars(
+        select(StockItem).where(StockItem.id.in_(ids)).execution_options(populate_existing=True)
+    ).unique().all()
+    return {item.id: item for item in items}
+
+
+def insufficient_stock_error(item: StockItem, wanted: int) -> AppError:
+    return AppError(
+        409,
+        "insufficient_stock",
+        f'Only {item.quantity_on_hand} {item.unit_of_measure} of "{item.name}" in stock '
+        f"({wanted} requested). Stock cannot go below 0.",
+        {"stock_item_id": item.id, "quantity_on_hand": item.quantity_on_hand, "requested": wanted},
+    )
+
+
+def record_movement(
+    db: Session,
+    *,
+    item: StockItem,
+    movement_type: str,
+    quantity: int,
+    movement_date: date,
+    actor: User,
+    purchase_line_id: int | None = None,
+    reason: str | None = None,
+) -> StockMovement:
+    """Add ONE stock movement and change the item's balance by it, in the caller's
+    transaction (B39). Does NOT commit: the caller commits (with its audit row)
+    or rolls back, so balance and history always match.
+
+    - quantity: whole number > 0; the type says in (receipt, adjustment_in,
+      opening) or out (issue, adjustment_out) (P7).
+    - A receipt must name its purchase line; other types must not.
+    - Out-movements never take stock below 0 (INV-07, BR-10): 409 `insufficient_stock`.
+    - The item should be locked first (lock_stock_items).
+    """
+    if movement_type not in MovementType.ALL:
+        raise ValueError(f"Unknown stock movement type: {movement_type!r}")
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+        raise ValueError("A stock movement's quantity must be a whole number above 0.")
+    if (movement_type == MovementType.RECEIPT) != (purchase_line_id is not None):
+        raise ValueError("A receipt movement needs its purchase line, and only a receipt has one.")
+    reason = optional_text(reason)
+    if reason is not None and len(reason) > REASON_MAX_LENGTH:
+        raise AppError(422, "invalid_reason", f"The reason can be at most {REASON_MAX_LENGTH} characters.")
+
+    if movement_type in MovementType.OUTGOING:
+        if quantity > item.quantity_on_hand:
+            raise insufficient_stock_error(item, quantity)
+        new_balance = item.quantity_on_hand - quantity
+    else:
+        new_balance = item.quantity_on_hand + quantity
+
+    item.quantity_on_hand = new_balance
+    movement = StockMovement(
+        stock_item_id=item.id,
+        stock_item=item,
+        movement_type=movement_type,
+        quantity=quantity,
+        balance_after=new_balance,
+        movement_date=movement_date,
+        purchase_line_id=purchase_line_id,
+        reason=reason,
+        created_by_user_id=actor.id,
+    )
+    db.add(movement)
+    return movement

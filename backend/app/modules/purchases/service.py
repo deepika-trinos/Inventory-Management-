@@ -1,14 +1,15 @@
 """Purchases: list, get, create, edit, cancel (Slice 3.1, PUR-01 to PUR-04, PUR-08, BR-06)
-and receive one-by-one items (Slice 3.2, PUR-05, PUR-06, BR-07, BR-08).
+and receive them: one-by-one items (Slice 3.2, PUR-05, PUR-06, BR-07, BR-08) and
+by-quantity items (Slice 3.3, PUR-07, INV-03).
 
-Used by the /purchases endpoints (Admin and IT Manager, P6). Slice 3.3 adds
-receiving by-quantity lines; Slice 3.4 adds the purchase history screens.
+Used by the /purchases endpoints (Admin and IT Manager, P6). Slice 3.4 adds the
+purchase history screens.
 
 Every change writes an audit row in the SAME transaction (BR-13, B11).
 
 RULES
 - A new purchase is a DRAFT. Drafts and cancelled purchases NEVER change stock or
-  create assets (PUR-08, BR-06): nothing in this file touches stock_items or assets.
+  create assets (PUR-08, BR-06): only receive_purchase() does.
 - Only a DRAFT can be edited or cancelled (`purchase_not_draft`). Cancelled and
   received are final (P6).
 - Vendor must be ACTIVE (vendors.ensure_vendor_active, B33). Reference number is
@@ -25,17 +26,21 @@ RULES
 - Line totals and the purchase total are calculated here, never typed in.
 - BR-12: purchases are never deleted. There is no delete function and no DELETE endpoint.
 
-RECEIVING (Slice 3.2, see receive_purchase)
-- Only a DRAFT is received, in ONE step covering every line (B55). It then becomes
-  RECEIVED and is final (P6).
-- By-quantity lines cannot be received until Slice 3.3 (B56): a purchase with any
-  bulk line is refused (`bulk_receiving_unavailable`).
+RECEIVING (Slices 3.2-3.3, see receive_purchase)
+- Only a DRAFT is received, in ONE step covering every line, one-by-one and
+  by-quantity mixed (B55). It then becomes RECEIVED and is final (P6).
 - Per line: received quantity 0 to ordered (P4); at least 1 unit in total (B58).
   Received date: not before the purchase date, not in the future (B58).
-- One asset per unit received (PUR-06, BR-08), status Available, IDs AST-000001...
+- One-by-one line: one asset per unit received (PUR-06, BR-08), status
+  Available, IDs AST-000001...
+- By-quantity line: one `receipt` stock movement of the received quantity,
+  raising the stock item's balance (PUR-07, INV-03). 0 received = no movement
+  (C1). The stock items are row-locked first, so receipts saved at the same
+  moment add up correctly. A DEACTIVATED stock item refuses the receipt when
+  stock would arrive (`stock_item_inactive`, C5, keeps B38 true).
 - A deactivated vendor or category does not block receiving (B59).
-- Everything (status, quantities, assets, audit rows) in ONE transaction: any
-  failure (e.g. a duplicate serial number) saves nothing.
+- Everything (status, quantities, assets, movements, balances, audit rows) in
+  ONE transaction: any failure (e.g. a duplicate serial number) saves nothing.
 """
 
 from datetime import date, datetime
@@ -59,6 +64,7 @@ from app.modules.audit.service import AuditContext
 from app.modules.categories import service as categories_service
 from app.modules.categories.models import TrackingType
 from app.modules.inventory import service as inventory_service
+from app.modules.inventory.models import MovementType, StockItem
 from app.modules.purchases.models import LineType, Purchase, PurchaseLine, PurchaseStatus
 from app.modules.purchases.schemas import MAX_UNITS_PER_RECEIPT
 from app.modules.users.models import User
@@ -148,6 +154,17 @@ def _line_snapshot(line: PurchaseLine) -> dict[str, Any]:
         "line_total": line.line_total,
         "received_quantity": line.received_quantity,
         "asset_codes": [asset.asset_code for asset in line.assets],
+    }
+
+
+def _bulk_receipt_snapshot(line: PurchaseLine, balance_after: int | None) -> dict[str, Any]:
+    """What purchase.received records about a by-quantity line (C8): item, quantity, new balance."""
+    return {
+        "stock_item_id": line.stock_item_id,
+        "stock_item": line.stock_item.name if line.stock_item else None,
+        "unit_of_measure": line.stock_item.unit_of_measure if line.stock_item else None,
+        "received_quantity": line.received_quantity,
+        "balance_after": balance_after,
     }
 
 
@@ -440,7 +457,7 @@ def cancel_purchase(
     )
 
 
-# ---- Receiving one-by-one items (Slice 3.2) -------------------------------------------
+# ---- Receiving (Slice 3.2: one-by-one items, Slice 3.3: by-quantity items) ------------
 
 def _unit_error(error: AppError, line_number: int, unit_number: int) -> AppError:
     """Add where the unit is (line 1, 2, ... and unit 1, 2, ...) to an error."""
@@ -488,13 +505,15 @@ def _match_receipt_lines(purchase: Purchase, sent: list[dict[str, Any]]) -> dict
 
 
 def _check_receipt(
-    db: Session, purchase: Purchase, sent: dict[int, dict[str, Any]]
+    db: Session, purchase: Purchase, sent: dict[int, dict[str, Any]], stock_items: dict[int, StockItem]
 ) -> list[tuple[PurchaseLine, int, list[dict[str, Any]]]]:
     """Check every line and unit BEFORE anything changes. Returns, per line:
-    (line, received quantity, the cleaned details of each unit)."""
+    (line, received quantity, the cleaned details of each unit; empty for by-quantity lines).
+    `stock_items` are the (locked, fresh) stock items of the by-quantity lines."""
     plan: list[tuple[PurchaseLine, int, list[dict[str, Any]]]] = []
     seen: dict[str, tuple[int, int]] = {}  # lower(serial) -> (line, unit) where it was first typed
-    total_units = 0
+    total_units = 0  # assets to create (limited by MAX_UNITS_PER_RECEIPT)
+    total_received = 0  # assets + by-quantity units
     for number, line in enumerate(purchase.lines, start=1):
         item = sent[line.id]
         quantity = item["received_quantity"]
@@ -506,6 +525,27 @@ def _check_receipt(
                 number,
                 f"{quantity} received but only {line.quantity} ordered. More than ordered is not allowed.",
             )
+        total_received += quantity
+
+        if line.line_type == LineType.BULK:
+            if units:
+                raise _line_error(
+                    422,
+                    "units_not_allowed",
+                    number,
+                    "a by-quantity line takes a received quantity only, no unit details.",
+                )
+            stock_item = stock_items[line.stock_item_id]
+            if quantity > 0 and not stock_item.is_active:
+                raise _line_error(
+                    409,
+                    "stock_item_inactive",
+                    number,
+                    f'stock item "{stock_item.name}" is deactivated. Reactivate it first, then receive.',
+                )
+            plan.append((line, quantity, []))
+            continue
+
         if len(units) != quantity:
             raise _line_error(
                 422,
@@ -520,7 +560,9 @@ def _check_receipt(
         cleaned: list[dict[str, Any]] = []
         for unit_number, unit in enumerate(units, start=1):
             try:
-                clean = assets_service.clean_unit(unit, default_name=line.description)
+                clean = assets_service.clean_unit(
+                    unit, default_name=line.description, purchase_date=purchase.purchase_date
+                )
             except AppError as error:
                 raise _unit_error(error, number, unit_number) from None
             key = clean["serial_number"].lower()
@@ -538,7 +580,7 @@ def _check_receipt(
             cleaned.append(clean)
         plan.append((line, quantity, cleaned))
 
-    if total_units == 0:
+    if total_received == 0:
         raise AppError(422, "nothing_received", "Nothing was received. At least one unit must arrive.")
 
     # Serial numbers already used by existing assets (AST-06): point at the first one.
@@ -558,46 +600,65 @@ def receive_purchase(
     data: dict[str, Any],
     context: AuditContext | None = None,
 ) -> Purchase:
-    """Receive a DRAFT purchase of one-by-one items in ONE step (Slice 3.2, B55).
+    """Receive a DRAFT purchase in ONE step, every line (Slices 3.2-3.3, B55).
 
     data = {"received_date": date, "lines": [{"line_id", "received_quantity",
             "units": [{"serial_number", "model", "name", "brand", "warranty_expiry", "location"}]}]}
+    By-quantity lines send no units.
 
-    Creates one asset per unit received (PUR-06, BR-08), status Available, with
-    the line's category, the purchase date and the line's unit cost (AST-02).
-    The purchase becomes RECEIVED (final, P6). Audit: purchase.received plus one
-    asset.created per asset. All in ONE transaction: any failure saves nothing.
+    One-by-one line: one asset per unit received (PUR-06, BR-08), status
+    Available, with the line's category, the purchase date and the line's unit
+    cost (AST-02). By-quantity line: one `receipt` stock movement (dated the
+    received date) raising the stock item's balance (PUR-07, INV-03); none when
+    0 arrived (C1). The purchase becomes RECEIVED (final, P6).
+    Audit: purchase.received (listing the by-quantity receipts with each new
+    balance) plus one asset.created per asset; no audit row per movement (the
+    movement table is itself the permanent history). All in ONE transaction:
+    any failure saves nothing.
 
-    Errors: 409 `purchase_not_draft`, `bulk_receiving_unavailable` (B56),
+    The caller must hold the purchase's row lock (get_purchase(lock=True)).
+
+    Errors: 409 `purchase_not_draft`, `stock_item_inactive` (C5),
     `serial_number_duplicate` (same serial twice in this receipt),
     `serial_number_taken` (an existing asset has it);
     422 `received_date_in_future`, `received_date_before_purchase`,
     `invalid_receipt_line`, `receipt_line_missing`, `received_quantity_too_high`,
-    `unit_count_mismatch`, `nothing_received`, `too_many_units`,
+    `unit_count_mismatch`, `units_not_allowed`, `nothing_received`, `too_many_units`,
     `invalid_serial_number`, `invalid_model`, `invalid_asset_name`, `invalid_brand`,
-    `invalid_location`. Line / unit problems carry details.line and details.unit (1, 2, ...).
+    `invalid_location`, `invalid_warranty_expiry`. Line / unit problems carry
+    details.line and details.unit (1, 2, ...).
     """
     _ensure_draft(purchase, "received")
 
-    bulk_lines = [n for n, line in enumerate(purchase.lines, start=1) if line.line_type == LineType.BULK]
-    if bulk_lines:
-        raise AppError(
-            409,
-            "bulk_receiving_unavailable",
-            "This purchase has by-quantity lines. Receiving by-quantity items arrives in Slice 3.3, "
-            "so this purchase cannot be received yet.",
-            {"lines": bulk_lines},
-        )
-
     received_date = _check_received_date(purchase, data["received_date"])
     sent = _match_receipt_lines(purchase, data.get("lines") or [])
-    plan = _check_receipt(db, purchase, sent)
+    # Lock the stock items now (id order) and read their CURRENT status and balance.
+    stock_items = inventory_service.lock_stock_items(
+        db, {line.stock_item_id for line in purchase.lines if line.line_type == LineType.BULK}
+    )
+    plan = _check_receipt(db, purchase, sent, stock_items)
 
     # Everything checked: apply the receipt.
     before = _snapshot(purchase)
     new_assets: list[Asset] = []
+    bulk_receipts: list[dict[str, Any]] = []
     for line, quantity, cleaned in plan:
         line.received_quantity = quantity
+        if line.line_type == LineType.BULK:
+            balance = None
+            if quantity > 0:
+                movement = inventory_service.record_movement(
+                    db,
+                    item=stock_items[line.stock_item_id],
+                    movement_type=MovementType.RECEIPT,
+                    quantity=quantity,
+                    movement_date=received_date,
+                    actor=actor,
+                    purchase_line_id=line.id,
+                )
+                balance = movement.balance_after
+            bulk_receipts.append(_bulk_receipt_snapshot(line, balance))
+            continue
         for clean in cleaned:
             asset = Asset(
                 **clean,
@@ -616,13 +677,16 @@ def receive_purchase(
 
     try:
         db.flush()  # the database gives each asset its AST-... ID here
+        after = _snapshot(purchase)
+        if bulk_receipts:
+            after["stock_received"] = bulk_receipts
         audit.record(
             db,
             actor=actor,
             action=AuditAction.PURCHASE_RECEIVED,
             entity=purchase,
             before=before,
-            after=_snapshot(purchase),
+            after=after,
             context=context,
         )
         for asset in new_assets:

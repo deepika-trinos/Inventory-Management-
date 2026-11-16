@@ -3,8 +3,8 @@
 // filter by status and vendor. Create a draft, edit a draft, or cancel a draft
 // (after a confirm box). Received and cancelled purchases open read-only.
 // A draft or cancelled purchase never changes stock (PUR-08, BR-06). No delete (BR-12).
-// Receive a draft of one-by-one items (Slice 3.2): each unit becomes an asset.
-// By-quantity receiving arrives in Slice 3.3; the full history screens in Slice 3.4.
+// Receive a draft (Slices 3.2-3.3): each one-by-one unit becomes an asset; each
+// by-quantity line adds to stock. The full history screens arrive in Slice 3.4.
 import { useCallback, useEffect, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
