@@ -30,6 +30,12 @@ export default function EmployeesPage() {
   // Filters
   const [statusFilter, setStatusFilter] = useState('') // '', 'active', 'inactive'
   const [departmentFilter, setDepartmentFilter] = useState('')
+  // While any filter is set: a Clear filters button, and "No matches" for an empty result (D9).
+  const filtersActive = Boolean(statusFilter || departmentFilter)
+  const clearFilters = () => {
+    setStatusFilter('')
+    setDepartmentFilter('')
+  }
   const [departments, setDepartments] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
@@ -162,6 +168,11 @@ export default function EmployeesPage() {
         <MenuItem value="active">Active</MenuItem>
         <MenuItem value="inactive">Inactive</MenuItem>
       </TextField>
+      {filtersActive ? (
+        <Button size="small" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ) : null}
     </>
   )
 
@@ -191,6 +202,8 @@ export default function EmployeesPage() {
         emptyMessage="Add the first one with “Add employee”."
         reloadKey={reloadKey}
         toolbar={filters}
+        filtersActive={filtersActive}
+        onClearFilters={clearFilters}
       />
 
       {dialog?.type === 'create' || dialog?.type === 'edit' ? (

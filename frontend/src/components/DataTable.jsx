@@ -12,10 +12,16 @@
 //
 // It matches the backend's paged-list helper: page starts at 1, sort is a field
 // name with "-" for descending, and the answer is { items, total, page, page_size }.
+//
+// Filters: pass filtersActive (true when any of the page's own filters is set) and
+// onClearFilters (resets them). Then an empty result says "No matches" instead of
+// emptyTitle (which is meant for a list that is truly empty) and offers a button
+// that clears the search box and the filters.
 import { useCallback, useEffect, useState } from 'react'
 import SearchOutlined from '@mui/icons-material/SearchOutlined'
 import {
   Box,
+  Button,
   InputAdornment,
   LinearProgress,
   Paper,
@@ -36,6 +42,21 @@ import LoadingState from './LoadingState'
 
 const SEARCH_DELAY_MS = 400 // wait until the user pauses typing before asking the server
 
+// Why an empty result is empty, when a search or filters are in use.
+function noMatchesMessage(search, filtersActive) {
+  if (search && filtersActive) return `Nothing matches “${search}” with the selected filters.`
+  if (search) return `Nothing matches “${search}”.`
+  return 'Nothing matches the selected filters.'
+}
+
+// The "clear" button's label, or null when there is nothing the table can clear.
+function clearLabel(search, canClearFilters) {
+  if (search && canClearFilters) return 'Clear search and filters'
+  if (search) return 'Clear search'
+  if (canClearFilters) return 'Clear filters'
+  return null
+}
+
 function parseSort(sort) {
   if (!sort) return { field: null, direction: 'asc' }
   return sort.startsWith('-')
@@ -54,7 +75,11 @@ export default function DataTable({
   emptyMessage,
   pageSizeOptions = [10, 20, 50],
   reloadKey = 0, // change this number to make the table fetch again (e.g. after saving)
+  filtersActive = false, // true when any of the page's own filters (toolbar) is set
+  onClearFilters = null, // () => reset the page's own filters; the table clears its search box itself
   toolbar = null, // extra controls shown next to the search box (e.g. filters)
+  onRowClick = null, // optional: (row) => ... makes each row open something (mouse, Enter or Space)
+  rowLabel = null, // optional: (row) => accessible name of a clickable row
 }) {
   const [page, setPage] = useState(0) // MUI counts pages from 0; the server from 1
   const [pageSize, setPageSize] = useState(pageSizeOptions[1] ?? pageSizeOptions[0])
@@ -180,15 +205,51 @@ export default function DataTable({
               {result.items.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={columns.length}>
-                    <EmptyState
-                      title={search ? 'No matches' : emptyTitle}
-                      message={search ? `Nothing matches “${search}”.` : emptyMessage}
-                    />
+                    {search || filtersActive ? (
+                      <EmptyState
+                        title="No matches"
+                        message={noMatchesMessage(search, filtersActive)}
+                        action={
+                          clearLabel(search, filtersActive && onClearFilters) ? (
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                setSearchInput('')
+                                setSearch('')
+                                setPage(0)
+                                if (filtersActive) onClearFilters?.()
+                              }}
+                            >
+                              {clearLabel(search, filtersActive && onClearFilters)}
+                            </Button>
+                          ) : null
+                        }
+                      />
+                    ) : (
+                      <EmptyState title={emptyTitle} message={emptyMessage} />
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
                 result.items.map((row) => (
-                  <TableRow key={row[rowKey]} hover>
+                  <TableRow
+                    key={row[rowKey]}
+                    hover
+                    {...(onRowClick
+                      ? {
+                          onClick: () => onRowClick(row),
+                          onKeyDown: (e) => {
+                            if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                              e.preventDefault()
+                              onRowClick(row)
+                            }
+                          },
+                          tabIndex: 0,
+                          'aria-label': rowLabel ? rowLabel(row) : undefined,
+                          sx: { cursor: 'pointer' },
+                        }
+                      : {})}
+                  >
                     {columns.map((col) => (
                       <TableCell key={col.field} align={col.align}>
                         {col.render ? col.render(row) : row[col.field]}

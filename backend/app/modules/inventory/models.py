@@ -15,7 +15,7 @@ tracking_type is 'bulk'; laptops and monitors ('serialized') are never stock ite
 """
 
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
@@ -33,6 +33,9 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
 from app.modules.categories.models import AssetCategory
+
+if TYPE_CHECKING:
+    from app.modules.users.models import User
 
 
 class StockItemStatus:
@@ -144,6 +147,7 @@ class StockMovement(Base):
     )
 
     stock_item: Mapped[StockItem] = relationship()
+    created_by: Mapped["User"] = relationship(lazy="joined")  # the responsible user (BR-09)
 
     def __repr__(self) -> str:
         return f"<StockMovement {self.id} {self.movement_type} {self.quantity} item={self.stock_item_id}>"

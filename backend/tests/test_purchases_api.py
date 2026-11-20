@@ -182,7 +182,10 @@ def test_draft_with_laptops_and_mice_is_saved_edited_and_cancelled_without_chang
     body = created.json()
     assert body["status"] == "draft"
     assert body["purchase_number"] == "PUR-000001"
-    assert body["vendor"] == {"id": data["acme"], "name": "Acme IT Supplies", "status": "active"}
+    # Since Slice 3.4 the vendor also carries its contact details (PUR-09).
+    assert {k: body["vendor"][k] for k in ("id", "name", "status")} == {
+        "id": data["acme"], "name": "Acme IT Supplies", "status": "active"
+    }
     assert body["reference_number"] == "INV-2026-0042"
     assert body["received_date"] is None
     assert body["created_by"] == {"id": user.id, "email": user.email}

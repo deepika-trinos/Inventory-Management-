@@ -32,6 +32,11 @@ export default function VendorsPage() {
   const notify = useNotify()
 
   const [statusFilter, setStatusFilter] = useState('') // '', 'active', 'inactive'
+  // While any filter is set: a Clear filters button, and "No matches" for an empty result (D9).
+  const filtersActive = Boolean(statusFilter)
+  const clearFilters = () => {
+    setStatusFilter('')
+  }
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
 
@@ -104,18 +109,25 @@ export default function VendorsPage() {
   ]
 
   const filters = (
-    <TextField
-      select
-      size="small"
-      label="Status"
-      value={statusFilter}
-      onChange={(e) => setStatusFilter(e.target.value)}
-      sx={{ minWidth: 130 }}
-    >
-      <MenuItem value="">All</MenuItem>
-      <MenuItem value="active">Active</MenuItem>
-      <MenuItem value="inactive">Inactive</MenuItem>
-    </TextField>
+    <>
+      <TextField
+        select
+        size="small"
+        label="Status"
+        value={statusFilter}
+        onChange={(e) => setStatusFilter(e.target.value)}
+        sx={{ minWidth: 130 }}
+      >
+        <MenuItem value="">All</MenuItem>
+        <MenuItem value="active">Active</MenuItem>
+        <MenuItem value="inactive">Inactive</MenuItem>
+      </TextField>
+      {filtersActive ? (
+        <Button size="small" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ) : null}
+    </>
   )
 
   const target = dialog?.vendor
@@ -141,6 +153,8 @@ export default function VendorsPage() {
         emptyMessage="Add the first one with “Add vendor”."
         reloadKey={reloadKey}
         toolbar={filters}
+        filtersActive={filtersActive}
+        onClearFilters={clearFilters}
       />
 
       {dialog?.type === 'create' || dialog?.type === 'edit' ? (

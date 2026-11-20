@@ -15,17 +15,35 @@ export function purchaseStatusLabel(value) {
   return PURCHASE_STATUSES.find((s) => s.value === value)?.label ?? value
 }
 
-// { page, pageSize, sort, search, status, vendorId } -> { items, total, page, page_size }
-export async function listPurchases({ page = 1, pageSize = 20, sort, search, status, vendorId }) {
+// { page, pageSize, sort, search, status, vendorId, dateFrom, dateTo } -> { items, total, page, page_size }
+// Also a vendor's purchase history (Slice 3.4, VEN-04): { vendorId, sort: '-purchase_date' }.
+// dateFrom / dateTo ("YYYY-MM-DD") limit the purchase date, both days included.
+export async function listPurchases({ page = 1, pageSize = 20, sort, search, status, vendorId, dateFrom, dateTo }) {
   const params = { page, page_size: pageSize }
   if (sort) params.sort = sort
   if (search) params.search = search
   if (status) params.status = status
   if (vendorId) params.vendor_id = vendorId
+  if (dateFrom) params.date_from = dateFrom
+  if (dateTo) params.date_to = dateTo
   const { data } = await apiClient.get(BASE, { params })
   return data
 }
 
+// How stock movement types are shown (P7).
+const MOVEMENT_TYPE_LABELS = {
+  receipt: 'Receipt',
+  issue: 'Issue',
+  adjustment_in: 'Adjustment in',
+  adjustment_out: 'Adjustment out',
+  opening: 'Opening stock',
+}
+
+export function movementTypeLabel(value) {
+  return MOVEMENT_TYPE_LABELS[value] ?? value
+}
+
+// One purchase with its lines, assets created and stock movements written (PUR-09).
 export async function getPurchase(id) {
   const { data } = await apiClient.get(`${BASE}/${id}`)
   return data

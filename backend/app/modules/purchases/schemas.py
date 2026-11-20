@@ -42,6 +42,15 @@ class VendorSummary(BaseModel):
     status: str
 
 
+class VendorDetails(VendorSummary):
+    """The vendor with its contact details, on the purchase detail (PUR-09)."""
+
+    contact_person: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    address: str | None = None
+
+
 class UserSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,6 +77,20 @@ class CategorySummary(BaseModel):
     status: str
 
 
+class StockMovementLink(BaseModel):
+    """A stock movement written when a by-quantity line was received (Slice 3.3; shown from 3.4)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    movement_type: str
+    quantity: int
+    balance_after: int = Field(description="The stock item's balance right after this movement (C4).")
+    movement_date: date = Field(description="The business date: for a receipt, the received date (C2).")
+    created_at: datetime = Field(description="When it was saved (UTC).")
+    created_by: UserSummary
+
+
 class PurchaseLineRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -82,6 +105,9 @@ class PurchaseLineRead(BaseModel):
     received_quantity: int | None = Field(description="Empty until the purchase is received (3.2 / 3.3).")
     assets: list[AssetLink] = Field(
         default_factory=list, description="One-by-one lines: the assets created when received (Slice 3.2)."
+    )
+    stock_movements: list[StockMovementLink] = Field(
+        default_factory=list, description="By-quantity lines: the stock movements written when received (Slice 3.3)."
     )
 
 
@@ -104,10 +130,13 @@ class PurchaseSummary(BaseModel):
 
 
 class PurchaseRead(PurchaseSummary):
-    """One purchase with its lines. All times are UTC (ISO 8601 with offset)."""
+    """One purchase with its lines (PUR-09). All times are UTC (ISO 8601 with offset)."""
 
+    vendor: VendorDetails
     notes: str | None
     created_by: UserSummary
+    received_by: UserSummary | None = Field(description="Who received it; empty unless received (D1).")
+    received_at: datetime | None = Field(description="When the receipt was saved (UTC); empty unless received.")
     lines: list[PurchaseLineRead]
 
 

@@ -23,13 +23,14 @@ purchase_lines (P1)
 - Line totals and the purchase total are CALCULATED (quantity x unit cost), never stored or typed.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
     Date,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -43,7 +44,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
 from app.modules.categories.models import AssetCategory
-from app.modules.inventory.models import StockItem
+from app.modules.inventory.models import StockItem, StockMovement
 from app.modules.users.models import User
 from app.modules.vendors.models import Vendor
 
@@ -82,6 +83,10 @@ class Purchase(TimestampMixin, Base):
         CheckConstraint("status IN ('draft', 'received', 'cancelled')", name="status_valid"),
         CheckConstraint("length(trim(reference_number)) > 0", name="reference_not_blank"),
         CheckConstraint("status = 'received' OR received_date IS NULL", name="received_date_only_when_received"),
+        CheckConstraint(
+            "status = 'received' OR (received_by_user_id IS NULL AND received_at IS NULL)",
+            name="received_by_only_when_received",
+        ),
     )
     # Read the database-made purchase_number back right after the INSERT.
     __mapper_args__ = {"eager_defaults": True}
@@ -105,8 +110,14 @@ class Purchase(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
+    # Who received it and when the receipt was saved (UTC); empty unless received
+    # (Slice 3.4, D1; migration 0011 filled them in for older receipts from the audit log).
+    received_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     vendor: Mapped[Vendor] = relationship(lazy="joined")
-    created_by: Mapped[User] = relationship(lazy="joined")
+    created_by: Mapped[User] = relationship(lazy="joined", foreign_keys=[created_by_user_id])
+    received_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[received_by_user_id])
     lines: Mapped[list["PurchaseLine"]] = relationship(
         back_populates="purchase",
         lazy="selectin",
@@ -172,6 +183,10 @@ class PurchaseLine(TimestampMixin, Base):
     category: Mapped[AssetCategory | None] = relationship(lazy="joined")
     # The assets created when this one-by-one line was received (Slice 3.2, PUR-06).
     assets: Mapped[list["Asset"]] = relationship(back_populates="purchase_line", lazy="selectin", order_by="Asset.id")
+    # The stock movements written when this by-quantity line was received (Slice 3.3; shown from 3.4).
+    stock_movements: Mapped[list[StockMovement]] = relationship(
+        lazy="selectin", order_by=StockMovement.id, viewonly=True
+    )
 
     @property
     def line_total(self) -> Decimal:

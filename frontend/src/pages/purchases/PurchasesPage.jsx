@@ -4,24 +4,25 @@
 // (after a confirm box). Received and cancelled purchases open read-only.
 // A draft or cancelled purchase never changes stock (PUR-08, BR-06). No delete (BR-12).
 // Receive a draft (Slices 3.2-3.3): each one-by-one unit becomes an asset; each
-// by-quantity line adds to stock. The full history screens arrive in Slice 3.4.
+// by-quantity line adds to stock.
+// Purchase history (Slice 3.4, PUR-09): purchase-date range filter, received date column;
+// the purchase number (or View) opens the detail page /purchases/:id.
 import { useCallback, useEffect, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import MoveToInboxOutlined from '@mui/icons-material/MoveToInboxOutlined'
 import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined'
-import { Button, IconButton, Link, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { useNavigate } from 'react-router'
+import { Button, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
 
 import { getErrorMessage } from '../../api/errors'
-import { cancelPurchase, listPurchases, PURCHASE_STATUSES, purchaseStatusLabel } from '../../api/purchases'
+import { cancelPurchase, listPurchases, PURCHASE_STATUSES } from '../../api/purchases'
 import { listVendors } from '../../api/vendors'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import DataTable from '../../components/DataTable'
-import StatusBadge from '../../components/StatusBadge'
 import { useNotify } from '../../context/NotificationContext'
-import { formatPlainDate } from '../../utils/dates'
-import { formatAmount } from '../../utils/money'
+import { purchaseHistoryColumns, purchasePath } from './purchaseColumns'
 import PurchaseFormDialog from './PurchaseFormDialog'
 import ReceivePurchaseDialog from './ReceivePurchaseDialog'
 import { receivedMessage } from './receiveForm'
@@ -31,9 +32,13 @@ export const CANCEL_PURCHASE_MESSAGE =
 
 export default function PurchasesPage() {
   const notify = useNotify()
+  const navigate = useNavigate()
 
   const [statusFilter, setStatusFilter] = useState('') // '', 'draft', 'received', 'cancelled'
   const [vendorFilter, setVendorFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('') // purchase date range, both days included ("YYYY-MM-DD")
+  const [dateTo, setDateTo] = useState('')
+  const badRange = Boolean(dateFrom && dateTo && dateFrom > dateTo)
   const [vendors, setVendors] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
@@ -50,8 +55,8 @@ export default function PurchasesPage() {
   }, [])
 
   const fetchRows = useCallback(
-    (args) => listPurchases({ ...args, status: statusFilter, vendorId: vendorFilter }),
-    [statusFilter, vendorFilter],
+    (args) => listPurchases({ ...args, status: statusFilter, vendorId: vendorFilter, dateFrom, dateTo }),
+    [statusFilter, vendorFilter, dateFrom, dateTo],
   )
 
   const doCancel = async () => {
@@ -67,33 +72,7 @@ export default function PurchasesPage() {
   }
 
   const columns = [
-    {
-      field: 'purchase_number',
-      label: 'Purchase no.',
-      sortable: true,
-      render: (p) => (
-        <Link
-          component="button"
-          type="button"
-          underline="hover"
-          onClick={() => setDialog({ type: 'edit', purchase: p })}
-          sx={{ verticalAlign: 'baseline' }}
-        >
-          {p.purchase_number}
-        </Link>
-      ),
-    },
-    { field: 'vendor', label: 'Vendor', sortable: true, render: (p) => p.vendor.name },
-    { field: 'reference_number', label: 'Invoice / ref.', sortable: true },
-    { field: 'purchase_date', label: 'Date', sortable: true, render: (p) => formatPlainDate(p.purchase_date) },
-    { field: 'line_count', label: 'Lines', align: 'right' },
-    { field: 'total_amount', label: 'Total', align: 'right', render: (p) => formatAmount(p.total_amount) },
-    {
-      field: 'status',
-      label: 'Status',
-      sortable: true,
-      render: (p) => <StatusBadge status={purchaseStatusLabel(p.status)} />,
-    },
+    ...purchaseHistoryColumns(),
     {
       field: 'actions',
       label: 'Actions',
@@ -102,15 +81,22 @@ export default function PurchasesPage() {
         const draft = p.status === 'draft'
         return (
           <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
-            <Tooltip title={draft ? 'Edit' : 'View'}>
-              <IconButton
-                size="small"
-                aria-label={`${draft ? 'Edit' : 'View'} ${p.purchase_number}`}
-                onClick={() => setDialog({ type: 'edit', purchase: p })}
-              >
-                {draft ? <EditOutlined fontSize="small" /> : <VisibilityOutlined fontSize="small" />}
+            <Tooltip title="View details">
+              <IconButton size="small" aria-label={`View ${p.purchase_number}`} onClick={() => navigate(purchasePath(p))}>
+                <VisibilityOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
+            {draft ? (
+              <Tooltip title="Edit">
+                <IconButton
+                  size="small"
+                  aria-label={`Edit ${p.purchase_number}`}
+                  onClick={() => setDialog({ type: 'edit', purchase: p })}
+                >
+                  <EditOutlined fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            ) : null}
             {draft ? (
               <Tooltip title="Receive">
                 <IconButton
@@ -174,6 +160,39 @@ export default function PurchasesPage() {
           </MenuItem>
         ))}
       </TextField>
+      <TextField
+        type="date"
+        size="small"
+        label="Purchase date from"
+        value={dateFrom}
+        onChange={(e) => setDateFrom(e.target.value)}
+        slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: dateTo || undefined } }}
+        sx={{ minWidth: 170 }}
+      />
+      <TextField
+        type="date"
+        size="small"
+        label="to"
+        value={dateTo}
+        onChange={(e) => setDateTo(e.target.value)}
+        error={badRange}
+        helperText={badRange ? 'Must be on or after the “from” date.' : undefined}
+        slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: dateFrom || undefined } }}
+        sx={{ minWidth: 150 }}
+      />
+      {statusFilter || vendorFilter || dateFrom || dateTo ? (
+        <Button
+          size="small"
+          onClick={() => {
+            setStatusFilter('')
+            setVendorFilter('')
+            setDateFrom('')
+            setDateTo('')
+          }}
+        >
+          Clear filters
+        </Button>
+      ) : null}
     </>
   )
 

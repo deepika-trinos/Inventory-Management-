@@ -68,8 +68,12 @@ def paginate(
     *,
     sortable: dict[str, Any],
     default_sort: str | None = None,
+    tiebreaker: Any | None = None,
 ) -> dict[str, Any]:
-    """Count all matching rows, then return one sorted page of them."""
+    """Count all matching rows, then return one sorted page of them.
+
+    tiebreaker: optional second column (e.g. the id) used, in the same direction,
+    when rows have the same value in the sort column, so paging is stable."""
     sort = params.sort or default_sort
     if sort:
         descending = sort.startswith("-")
@@ -83,6 +87,8 @@ def paginate(
             )
         column = sortable[field]
         stmt = stmt.order_by(column.desc() if descending else column.asc())
+        if tiebreaker is not None:
+            stmt = stmt.order_by(tiebreaker.desc() if descending else tiebreaker.asc())
 
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
     items = db.scalars(

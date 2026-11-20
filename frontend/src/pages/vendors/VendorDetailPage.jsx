@@ -1,13 +1,13 @@
 // Vendor detail page: /vendors/:vendorId (Admin and IT Manager, Slice 2.3, VEN-01).
 // Shows the vendor's details with Edit and Activate/Deactivate actions.
-// The "Purchase history" section is a placeholder: Slice 3.4 (VEN-04) fills it in.
+// Purchase history (Slice 3.4, VEN-04): this vendor's purchases, newest first; a row opens the purchase.
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
-import { Box, Button, Divider, Paper, Stack, Typography } from '@mui/material'
+import { Box, Button, Paper, Stack, Typography } from '@mui/material'
 
 import { getErrorCode, getErrorMessage } from '../../api/errors'
 import { getVendor, setVendorActive } from '../../api/vendors'
@@ -19,6 +19,7 @@ import StatusBadge, { recordStatusLabel } from '../../components/StatusBadge'
 import { useNotify } from '../../context/NotificationContext'
 import { formatDateTime } from '../../utils/dates'
 import VendorFormDialog from './VendorFormDialog'
+import VendorPurchaseHistory from './VendorPurchaseHistory'
 import { DEACTIVATE_VENDOR_MESSAGE } from './VendorsPage'
 
 function Detail({ label, value }) {
@@ -124,19 +125,7 @@ export default function VendorDetailPage() {
         </Box>
       </Paper>
 
-      {/* ---- PLACEHOLDER: Purchase history (Slice 3.4, VEN-04) ----------------------------
-          Slice 3.4 replaces this box with the list of this vendor's purchases
-          (purchase reference, date, status, total), newest first. */}
-      <Paper variant="outlined" sx={{ p: 2 }} data-testid="vendor-purchase-history">
-        <Typography variant="h6" component="h2">
-          Purchase history
-        </Typography>
-        <Divider sx={{ my: 1 }} />
-        <EmptyState
-          title="Coming in Slice 3.4"
-          message="Purchases from this vendor will be listed here once purchases are built."
-        />
-      </Paper>
+      <VendorPurchaseHistory vendorId={vendor.id} />
 
       {dialog === 'edit' ? (
         <VendorFormDialog

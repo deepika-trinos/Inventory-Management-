@@ -17,6 +17,7 @@ import NotFoundPage from '../pages/NotFoundPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
+import PurchaseDetailPage from '../pages/purchases/PurchaseDetailPage'
 import PurchasesPage from '../pages/purchases/PurchasesPage'
 import UsersPage from '../pages/users/UsersPage'
 import VendorDetailPage from '../pages/vendors/VendorDetailPage'
@@ -41,7 +42,10 @@ const BUILT_PAGES = {
 }
 
 // Detail pages: not in the menu; they use the roles of their menu page (parent).
-const DETAIL_PAGES = [{ path: '/vendors/:vendorId', parent: '/vendors', Page: VendorDetailPage }]
+const DETAIL_PAGES = [
+  { path: '/vendors/:vendorId', parent: '/vendors', Page: VendorDetailPage },
+  { path: '/purchases/:purchaseId', parent: '/purchases', Page: PurchaseDetailPage }, // Slice 3.4
+]
 
 function HomeRedirect() {
   const { role } = useAuth()

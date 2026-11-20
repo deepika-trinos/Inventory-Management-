@@ -2,6 +2,9 @@
 // filter asset categories; add and edit them; deactivate (after a confirm box)
 // or activate them. There is no delete: categories are deactivated (BR-12).
 // The server enforces every rule again (roles, unique names, tracking-type lock).
+// The Tracking and Status filters combine (both must match). While any filter is set,
+// "Clear filters" resets them, and an empty result says "No matches" (not "No
+// categories yet") with a button that clears the search and the filters.
 import { useCallback, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
@@ -24,6 +27,11 @@ export default function CategoriesPage() {
   // Filters
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('') // '', 'active', 'inactive'
+  const filtersActive = Boolean(typeFilter || statusFilter)
+  const clearFilters = () => {
+    setTypeFilter('')
+    setStatusFilter('')
+  }
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
 
@@ -129,6 +137,11 @@ export default function CategoriesPage() {
         <MenuItem value="active">Active</MenuItem>
         <MenuItem value="inactive">Inactive</MenuItem>
       </TextField>
+      {filtersActive ? (
+        <Button size="small" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ) : null}
     </>
   )
 
@@ -155,6 +168,8 @@ export default function CategoriesPage() {
         emptyMessage="Add one, e.g. Laptops (one-by-one) or Mice (by quantity)."
         reloadKey={reloadKey}
         toolbar={filters}
+        filtersActive={filtersActive}
+        onClearFilters={clearFilters}
       />
 
       {dialog?.type === 'create' || dialog?.type === 'edit' ? (

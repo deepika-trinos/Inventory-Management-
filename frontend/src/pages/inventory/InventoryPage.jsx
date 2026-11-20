@@ -24,6 +24,12 @@ export default function InventoryPage() {
 
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  // While any filter is set: a Clear filters button, and "No matches" for an empty result (D9).
+  const filtersActive = Boolean(categoryFilter || statusFilter)
+  const clearFilters = () => {
+    setCategoryFilter('')
+    setStatusFilter('')
+  }
   const [bulkCategories, setBulkCategories] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
@@ -138,6 +144,11 @@ export default function InventoryPage() {
         <MenuItem value="active">Active</MenuItem>
         <MenuItem value="inactive">Inactive</MenuItem>
       </TextField>
+      {filtersActive ? (
+        <Button size="small" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ) : null}
     </>
   )
 
@@ -169,6 +180,8 @@ export default function InventoryPage() {
         emptyMessage="Add one, e.g. USB mouse in a “By quantity” category."
         reloadKey={reloadKey}
         toolbar={filters}
+        filtersActive={filtersActive}
+        onClearFilters={clearFilters}
       />
 
       {dialog?.type === 'create' || dialog?.type === 'edit' ? (

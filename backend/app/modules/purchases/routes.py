@@ -8,6 +8,8 @@ Receiving is the only thing that changes stock or creates assets: one-by-one
 items from Slice 3.2 (POST /purchases/{id}/receive), by-quantity items from Slice 3.3.
 """
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
@@ -38,7 +40,10 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=PurchasePage, summary="List purchases")
+@router.get(
+    "", response_model=PurchasePage, summary="List purchases (also a vendor's purchase history)",
+    responses=error_responses(404, 422),
+)
 def list_purchases(
     params: PageParams = Depends(page_params),
     search: str | None = Query(
@@ -47,12 +52,23 @@ def list_purchases(
     status_filter: PurchaseStatusField | None = Query(
         None, alias="status", description="Only draft, received or cancelled."
     ),
-    vendor_id: int | None = Query(None, description="Only purchases from this vendor."),
+    vendor_id: int | None = Query(
+        None, description="Only purchases from this vendor (active or not): the vendor's purchase history (VEN-04)."
+    ),
+    date_from: date | None = Query(None, description="Purchase date on or after this day."),
+    date_to: date | None = Query(None, description="Purchase date on or before this day."),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Paged list, newest first by default. Sort by `purchase_number`, `purchase_date`,
-    `reference_number`, `vendor`, `status`, `created_at` or `updated_at` (prefix `-` for descending)."""
-    return service.list_purchases(db, params, search=search, status=status_filter, vendor_id=vendor_id)
+    """Paged list (PUR-09), newest first by default. Sort by `purchase_number`, `purchase_date`,
+    `received_date`, `reference_number`, `vendor`, `status`, `created_at` or `updated_at`
+    (prefix `-` for descending); equal values are ordered by purchase number.
+    A vendor's purchase history (VEN-04) = `vendor_id=<id>&sort=-purchase_date`.
+
+    - Unknown vendor: **404** `vendor_not_found`; `date_from` after `date_to`: **422** `invalid_date_range`
+    """
+    return service.list_purchases(
+        db, params, search=search, status=status_filter, vendor_id=vendor_id, date_from=date_from, date_to=date_to
+    )
 
 
 @router.post(
@@ -83,6 +99,10 @@ def create_purchase(
 
 @router.get("/{purchase_id}", response_model=PurchaseRead, summary="Get one purchase", responses=error_responses(404))
 def get_purchase(purchase_id: int, db: Session = Depends(get_db)) -> Purchase:
+    """The purchase detail (PUR-09): vendor with contact details; every line with its item,
+    ordered and received quantities, unit cost and line total; for a received purchase the
+    assets created (`lines[].assets`) and stock movements written (`lines[].stock_movements`);
+    who created and who received it, and when. Unknown id: **404** `purchase_not_found`."""
     return service.get_purchase(db, purchase_id)
 
 

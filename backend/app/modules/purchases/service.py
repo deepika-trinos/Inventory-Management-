@@ -53,6 +53,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.database import utc_now
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
 from app.core.text import optional_text, required_text
@@ -75,6 +76,7 @@ from app.modules.vendors.models import Vendor
 _SORTABLE = {
     "purchase_number": Purchase.id,  # numbers are given out in order
     "purchase_date": Purchase.purchase_date,
+    "received_date": Purchase.received_date,
     "reference_number": func.lower(Purchase.reference_number),
     "vendor": func.lower(Vendor.name),
     "status": Purchase.status,
@@ -329,9 +331,21 @@ def list_purchases(
     search: str | None = None,
     status: str | None = None,
     vendor_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, Any]:
-    """Paged list. `search` matches part of the reference number, the vendor's
-    name or the purchase number, ignoring case."""
+    """Paged list (PUR-09), also used for a vendor's purchase history (VEN-04,
+    vendor_id set). `search` matches part of the reference number, the vendor's
+    name or the purchase number, ignoring case. date_from / date_to limit the
+    PURCHASE date, both days included (D3). Rows with the same sort value are
+    ordered by purchase number in the same direction (D2).
+
+    Errors: 404 `vendor_not_found` (vendor_id of no vendor, active or not);
+    422 `invalid_date_range` (date_from after date_to)."""
+    if vendor_id is not None:
+        vendors_service.get_vendor(db, vendor_id)  # 404 for an unknown vendor; inactive ones still show
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise AppError(422, "invalid_date_range", "The 'from' date must be on or before the 'to' date.")
     stmt: Select = select(Purchase).join(Vendor, Purchase.vendor_id == Vendor.id)
     if search and search.strip():
         term = search.strip().lower()
@@ -346,7 +360,13 @@ def list_purchases(
         stmt = stmt.where(Purchase.status == status)
     if vendor_id is not None:
         stmt = stmt.where(Purchase.vendor_id == vendor_id)
-    return paginate(db, stmt, params, sortable=_SORTABLE, default_sort="-purchase_number")
+    if date_from is not None:
+        stmt = stmt.where(Purchase.purchase_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(Purchase.purchase_date <= date_to)
+    return paginate(
+        db, stmt, params, sortable=_SORTABLE, default_sort="-purchase_number", tiebreaker=Purchase.id
+    )
 
 
 # ---- Changing ---------------------------------------------------------------------
@@ -674,6 +694,8 @@ def receive_purchase(
             new_assets.append(asset)
     purchase.received_date = received_date
     purchase.status = PurchaseStatus.RECEIVED
+    purchase.received_by_user_id = actor.id  # who and when (D1, shown on the detail page)
+    purchase.received_at = utc_now()
 
     try:
         db.flush()  # the database gives each asset its AST-... ID here
@@ -710,4 +732,6 @@ def receive_purchase(
         db.rollback()
         raise
     db.refresh(purchase)
+    for line in purchase.lines:
+        db.refresh(line, attribute_names=["stock_movements"])  # the movements just written (shown from 3.4)
     return purchase
