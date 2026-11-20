@@ -1,15 +1,18 @@
 # Phase 3 (Purchase and receiving) — wrap-up
 
-- **Status:** ⏳ **Phase 3 complete, pending the owner's sign-off.** Slices 3.1–3.3 are signed
-  off (decisions B42–B66, C1–C12). Slice 3.4 (purchase history, decisions D1–D7) is built and
-  waiting for sign-off together with the phase.
+- **Status:** ✅ **Phase 3 signed off by the owner on 2026-11-20.** Slices 3.1–3.4 and decisions
+  B42–B66, C1–C12 and D1–D10 are signed off (D8 tightened at approval: `reset_password` runs
+  only with `APP_ENV=development` explicitly set; D10 fixed the Purchases "No matches" message
+  found during the manual test run). All 18 manual test steps in section 2 passed on
+  2026-11-20 on the TEST database.
 - **Date:** 2026-11-16
 - **Phase goal (build plan):** "Purchases reliably create asset or stock records." Met: a draft
   purchase changes nothing; receiving it creates one asset per one-by-one unit (with a new asset
   ID) and raises stock for by-quantity lines with a matching stock movement, all in one
   transaction with audit rows; every purchase can be found again from the purchase list and its
   vendor's page.
-- **Automated checks:** 545 backend tests pass (Phases 1–3); 86 frontend tests pass
+- **Automated checks (re-run 2026-11-20 on the Slice 3.4 code, after the D8 change):**
+  556 backend tests pass (Phases 1–3); 109 frontend tests pass in 9 files (after the D10 fix)
   (`npm test`); migrations 0008–0011 upgrade and downgrade cleanly (checked on the test database
   only); the frontend production build has no errors.
 
@@ -150,4 +153,7 @@ will not decide these alone.
 
 Still open from earlier:
 - **R2** (temporary passwords) and **Q12** (hosting and domain) don't block Phase 4.
-- **Sign-off of Slice 3.4 and Phase 3** (decisions D1–D7).
+- ~~Sign-off of Slice 3.4 decisions~~: **D1–D9 approved 2026-11-20.**
+- ~~Manual test run~~: **all 18 steps of section 2 passed on 2026-11-20**, run on the TEST database (`itam_test`) as Admin, IT Manager and Employee.
+  One wording problem was found (step 11: an empty filtered Purchases list said "No purchases yet") and fixed at the owner's request (D10).
+- ~~Sign-off of Phase 3~~: **✅ signed off by the owner on 2026-11-20.**

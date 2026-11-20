@@ -6,7 +6,10 @@ gap on a developer's own machine, e.g. when the dev Admin's password is lost:
 
     .venv\\Scripts\\python -m app.scripts.reset_password --email admin@example.com
 
-- It refuses to run when APP_ENV=production.
+- It runs ONLY when APP_ENV is explicitly set to "development" (in backend\\.env or
+  the environment). It refuses APP_ENV=production, APP_ENV=test, and an APP_ENV
+  that is not set at all (the app's default is "development", so a server that
+  forgot to set APP_ENV must not be treated as a developer's machine). Decision D8.
 - The new password is always asked for, twice, without showing it (never typed
   on the command line, where it would be saved in your command history), and
   must meet PASSWORD_MIN_LENGTH. It is stored only as a one-way hash.
@@ -33,13 +36,26 @@ from app.scripts._prompt import ask_email, ask_password
 AUDIT_NOTE = "password reset with the development script"
 
 
+def development_only_refusal(settings) -> str | None:
+    """Why the script must not run here, or None when APP_ENV=development was set on purpose."""
+    explicitly_set = "app_env" in getattr(settings, "model_fields_set", set())
+    if settings.app_env == "development" and explicitly_set:
+        return None
+    shown = settings.app_env if explicitly_set else "not set"
+    return (
+        f"reset_password is for development only (APP_ENV is {shown}). "
+        "It runs only when APP_ENV=development is set in backend\\.env or the environment."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Development only: set a new password for an existing login.")
     parser.add_argument("--email", help="The login's email (asked for when left out).")
     args = parser.parse_args(argv)
 
-    if get_settings().is_production:
-        print("reset_password is for development only.", file=sys.stderr)
+    refusal = development_only_refusal(get_settings())
+    if refusal:
+        print(refusal, file=sys.stderr)
         return 1
 
     with SessionLocal() as db:

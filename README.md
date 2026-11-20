@@ -12,10 +12,10 @@ user management. **Phase 2 (Master data) complete and signed off (2026-11-12):**
 categories (2.1), employees (2.2; every Employee-role login is linked to an employee record),
 vendors (2.3) and bulk stock items (2.4). See
 [documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). **Phase 3 (Purchase and
-receiving) complete, pending sign-off:** draft purchases (3.1), receiving one-by-one items as
-assets AST-000001, ... (3.2) and by-quantity items into stock with a permanent movement history
-(3.3) are signed off; purchase history (3.4: purchase list with date-range filter, purchase
-detail page, each vendor's purchase history) is built and waiting for sign-off. See
+receiving) complete and signed off (2026-11-20):** draft purchases (3.1), receiving one-by-one
+items as assets AST-000001, ... (3.2), by-quantity items into stock with a permanent movement
+history (3.3) and purchase history (3.4: purchase list with date-range filter, purchase detail
+page, each vendor's purchase history). See
 [documentation/Phase3_WrapUp.md](documentation/Phase3_WrapUp.md). Next: Phase 4 (Asset and
 inventory operations). Business pages not built yet show "Coming soon" until their phase.
 
@@ -363,7 +363,7 @@ is on.
 | `app/modules/employees/` | Employees (Slice 2.2): `/api/v1/employees` for Admin and IT Manager (list with search by ID/name/department, filters by status, department and has-login; `/departments` for suggestions; get, create, edit, activate/deactivate). Never deleted (BR-12). Deactivating an employee also deactivates the linked login. Every change audited. |
 | `app/modules/admin/` | Admin-only endpoints (`/admin/ping` test endpoint for now). |
 | `app/modules/audit/` | Append-only audit log: `models.py` (table), `actions.py` (every action name), `service.py` (`audit.record(...)`: writes in the caller's transaction and strips secrets). |
-| `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts; `--employee-code` links an employee, required for the Employee role). `reset_password` (development only: new password for an existing login, asked privately; refuses production; audited). |
+| `app/scripts/` | Command-line tools: `create_admin` (first Admin), `create_user` (dev test accounts; `--employee-code` links an employee, required for the Employee role). `reset_password` (strictly development only: runs only when `APP_ENV=development` is explicitly set; refuses production, test and a missing `APP_ENV`; new password for an existing login, asked privately; audited; D8). |
 | `scripts/sql/` | Handy read-only SQL queries, e.g. `recent_role_changes.sql`. |
 | `docker/init-test-db.sql` | Creates the `itam_test` database the first time the Docker database starts. |
 | `alembic.ini`, `alembic/` | Migration tool settings; `alembic/env.py` reads `DATABASE_URL`; `alembic/versions/` holds each migration. |
@@ -437,7 +437,7 @@ is on.
 | Users page: `last_admin` | Make another user an Admin before demoting or deactivating this one. |
 | Categories: `category_name_taken` | A category with that name already exists (upper/lower case is ignored, inactive ones count too). Use another name, or activate the existing one. |
 | Categories: `tracking_type_locked` | Items or assets already use this category, so it cannot switch between one-by-one and by quantity (from Slice 2.4 / 3.2 onward). |
-| Categories, Vendors, Employees, Inventory: a filter shows fewer (or no) rows than expected | The **Tracking** and **Status** filters combine: a category must match both (e.g. Inactive + By quantity shows only inactive by-quantity categories). The same applies to every list with more than one filter (e.g. Department + Status on Employees, Category + Status on Inventory). Click **Clear filters**, then set one filter at a time. |
+| Categories, Vendors, Employees, Inventory, Purchases: a filter shows fewer (or no) rows than expected ("No matches") | The **Tracking** and **Status** filters combine: a category must match both (e.g. Inactive + By quantity shows only inactive by-quantity categories). The same applies to every list with more than one filter (e.g. Department + Status on Employees, Category + Status on Inventory, Status + Vendor + purchase dates on Purchases). Click **Clear filters**, then set one filter at a time. |
 | Categories: there is no Delete | On purpose (BR-12). Deactivate the category instead; it stays visible but cannot be chosen for new records. |
 | Inventory: `category_not_bulk` | That category is tracked one by one (e.g. laptops). Stock items need a "By quantity" category. |
 | Inventory: `category_inactive` / empty category list | Only active "By quantity" categories can be chosen. Add or activate one on the Categories page first. |
@@ -469,6 +469,7 @@ is on.
 | Receive: `received_quantity_too_high` / `nothing_received` | Each line takes 0 up to the ordered quantity (fewer closes the line; the rest is never received later). At least one unit must arrive in the whole receipt. |
 | Receive: `received_date_before_purchase` / `received_date_in_future` | The received date must be between the purchase date and today (company timezone). |
 | Receive: `purchase_not_draft` | Only a draft can be received, once. Received purchases are final (P6): fix mistakes by retiring the asset (Slice 4.2). |
-| Login says "Incorrect email or password" and nobody knows the dev password | The app has no password reset (R2). On a **development** machine run `.venv\Scripts\python -m app.scripts.reset_password --email <the login's email>` from `backend` and type a new password (12+ characters) twice. A deactivated login must still be activated on the Users page. |
+| Login says "Incorrect email or password" and nobody knows the dev password | The app has no password reset (R2). On a **development** machine (with `APP_ENV=development` in `backend\.env`) run `.venv\Scripts\python -m app.scripts.reset_password --email <the login's email>` from `backend` and type a new password (12+ characters) twice. A deactivated login must still be activated on the Users page. |
+| `reset_password` says "for development only (APP_ENV is …)" | On purpose (D8): it runs only when `APP_ENV=development` is set explicitly. Add that line to `backend\.env` on your own machine. Never set it on a server. |
 | `ADMIN_PASSWORD` in `backend\.env` doesn't work | It is only read by `create_admin` when the **first** Admin is made; changing it later changes nothing. Use `reset_password` instead. |
 | `create_user` says `--employee-code is required` | Employee logins need an employee record: add one on the Employees page, then pass its ID. |

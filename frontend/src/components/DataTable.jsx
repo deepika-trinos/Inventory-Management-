@@ -17,6 +17,9 @@
 // onClearFilters (resets them). Then an empty result says "No matches" instead of
 // emptyTitle (which is meant for a list that is truly empty) and offers a button
 // that clears the search box and the filters.
+//
+// Errors show a "Try again" button. Pass canRetry={(error) => false} for errors that
+// asking again cannot fix (e.g. a "from" date after the "to" date).
 import { useCallback, useEffect, useState } from 'react'
 import SearchOutlined from '@mui/icons-material/SearchOutlined'
 import {
@@ -80,6 +83,7 @@ export default function DataTable({
   toolbar = null, // extra controls shown next to the search box (e.g. filters)
   onRowClick = null, // optional: (row) => ... makes each row open something (mouse, Enter or Space)
   rowLabel = null, // optional: (row) => accessible name of a clickable row
+  canRetry = () => true, // optional: (error) => false hides "Try again" for that error
 }) {
   const [page, setPage] = useState(0) // MUI counts pages from 0; the server from 1
   const [pageSize, setPageSize] = useState(pageSizeOptions[1] ?? pageSizeOptions[0])
@@ -170,7 +174,7 @@ export default function DataTable({
 
       {error ? (
         <Box sx={{ p: 2 }}>
-          <ErrorMessage error={error} onRetry={() => setAttempt((n) => n + 1)} />
+          <ErrorMessage error={error} onRetry={canRetry(error) ? () => setAttempt((n) => n + 1) : undefined} />
         </Box>
       ) : firstLoad ? (
         <LoadingState />

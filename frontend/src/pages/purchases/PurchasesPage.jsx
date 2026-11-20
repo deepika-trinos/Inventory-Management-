@@ -7,6 +7,9 @@
 // by-quantity line adds to stock.
 // Purchase history (Slice 3.4, PUR-09): purchase-date range filter, received date column;
 // the purchase number (or View) opens the detail page /purchases/:id.
+// While a filter is set, an empty result says "No matches" (not "No purchases yet") and
+// offers to clear the filters (D9, extended to Purchases at Phase 3 sign-off, D10). A
+// "from" date after the "to" date is explained without a useless "Try again" button.
 import { useCallback, useEffect, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
@@ -16,7 +19,7 @@ import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined'
 import { useNavigate } from 'react-router'
 import { Button, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
 
-import { getErrorMessage } from '../../api/errors'
+import { getErrorCode, getErrorMessage } from '../../api/errors'
 import { cancelPurchase, listPurchases, PURCHASE_STATUSES } from '../../api/purchases'
 import { listVendors } from '../../api/vendors'
 import ConfirmDialog from '../../components/ConfirmDialog'
@@ -39,6 +42,14 @@ export default function PurchasesPage() {
   const [dateFrom, setDateFrom] = useState('') // purchase date range, both days included ("YYYY-MM-DD")
   const [dateTo, setDateTo] = useState('')
   const badRange = Boolean(dateFrom && dateTo && dateFrom > dateTo)
+  // While any filter is set: "No matches" for an empty result, with a button to clear (D9).
+  const filtersActive = Boolean(statusFilter || vendorFilter || dateFrom || dateTo)
+  const clearFilters = () => {
+    setStatusFilter('')
+    setVendorFilter('')
+    setDateFrom('')
+    setDateTo('')
+  }
   const [vendors, setVendors] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((n) => n + 1)
@@ -180,16 +191,8 @@ export default function PurchasesPage() {
         slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: dateFrom || undefined } }}
         sx={{ minWidth: 150 }}
       />
-      {statusFilter || vendorFilter || dateFrom || dateTo ? (
-        <Button
-          size="small"
-          onClick={() => {
-            setStatusFilter('')
-            setVendorFilter('')
-            setDateFrom('')
-            setDateTo('')
-          }}
-        >
+      {filtersActive ? (
+        <Button size="small" onClick={clearFilters}>
           Clear filters
         </Button>
       ) : null}
@@ -218,6 +221,9 @@ export default function PurchasesPage() {
         emptyMessage="Create the first one with “New purchase”. It starts as a draft and changes no stock."
         reloadKey={reloadKey}
         toolbar={filters}
+        filtersActive={filtersActive}
+        onClearFilters={clearFilters}
+        canRetry={(error) => getErrorCode(error) !== 'invalid_date_range'} // fixing the dates is the way out
       />
 
       {dialog?.type === 'create' || dialog?.type === 'edit' ? (

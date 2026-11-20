@@ -13,6 +13,21 @@ from app.scripts import reset_password
 NEW_PASSWORD = "a-brand-new-long-password"
 
 
+def settings_with(app_env: str | None) -> SimpleNamespace:
+    """Settings as the script sees them: app_env=None means APP_ENV was not set (default)."""
+    return SimpleNamespace(
+        app_env=app_env or "development",
+        model_fields_set=set() if app_env is None else {"app_env"},
+    )
+
+
+@pytest.fixture(autouse=True)
+def development_machine(monkeypatch):
+    """The tests run with APP_ENV=test (conftest), which the script refuses (D8).
+    Every test here acts as a developer's machine unless it says otherwise."""
+    monkeypatch.setattr(reset_password, "get_settings", lambda: settings_with("development"))
+
+
 def typed(monkeypatch, *passwords):
     answers = iter(passwords)
     monkeypatch.setattr("getpass.getpass", lambda _: next(answers))
@@ -100,11 +115,33 @@ def test_passwords_that_do_not_match_change_nothing(make_user, monkeypatch):
     assert stored(user.id).password_hash == user.password_hash
 
 
-def test_refuses_to_run_in_production(make_user, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "app_env, shown",
+    [("production", "production"), ("test", "test"), (None, "not set")],
+)
+def test_refuses_to_run_unless_app_env_is_explicitly_development(make_user, monkeypatch, capsys, app_env, shown):
     user, _ = make_user("Admin")
-    monkeypatch.setattr(reset_password, "get_settings", lambda: SimpleNamespace(is_production=True))
+    monkeypatch.setattr(reset_password, "get_settings", lambda: settings_with(app_env))
+    typed(monkeypatch, NEW_PASSWORD, NEW_PASSWORD)
 
     assert reset_password.main(["--email", user.email]) == 1
 
-    assert "development only" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "development only" in err and f"APP_ENV is {shown}" in err
     assert stored(user.id).password_hash == user.password_hash
+
+
+def test_real_settings_without_app_env_are_refused(monkeypatch):
+    """With the real Settings class: APP_ENV missing everywhere -> refused, even
+    though the app's default is "development"."""
+    from app.core.config import Settings
+
+    monkeypatch.delenv("APP_ENV", raising=False)
+    missing = Settings(_env_file=None, database_url="postgresql+psycopg://x@localhost/x", jwt_secret_key="k" * 40)
+    explicit = Settings(
+        _env_file=None, database_url="postgresql+psycopg://x@localhost/x", jwt_secret_key="k" * 40, app_env="development"
+    )
+
+    assert missing.app_env == "development"
+    assert reset_password.development_only_refusal(missing) is not None
+    assert reset_password.development_only_refusal(explicit) is None
