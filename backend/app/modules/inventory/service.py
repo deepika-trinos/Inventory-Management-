@@ -161,7 +161,10 @@ def list_stock_items(
     category_id: int | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
-    """Paged list. `search` matches part of the name, ignoring case."""
+    """Paged list. `search` matches part of the name, ignoring case.
+
+    Rows with the same sort value (e.g. two items in one category) are ordered by id in
+    the sort's direction, so the order is stable and paging never repeats or skips a row (E10)."""
     stmt: Select = select(StockItem).join(AssetCategory, StockItem.category_id == AssetCategory.id)
     if search and search.strip():
         stmt = stmt.where(func.lower(StockItem.name).contains(search.strip().lower(), autoescape=True))
@@ -169,7 +172,7 @@ def list_stock_items(
         stmt = stmt.where(StockItem.category_id == category_id)
     if status:
         stmt = stmt.where(StockItem.status == status)
-    return paginate(db, stmt, params, sortable=_SORTABLE, default_sort="name")
+    return paginate(db, stmt, params, sortable=_SORTABLE, default_sort="name", tiebreaker=StockItem.id)
 
 
 # ---- Changing ---------------------------------------------------------------------

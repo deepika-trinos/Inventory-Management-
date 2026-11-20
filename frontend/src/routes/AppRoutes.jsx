@@ -14,6 +14,8 @@ import MainLayout from '../layouts/MainLayout'
 import ComingSoonPage from '../pages/ComingSoonPage'
 import LoginPage from '../pages/LoginPage'
 import NotFoundPage from '../pages/NotFoundPage'
+import AssetDetailPage from '../pages/assets/AssetDetailPage'
+import AssetsPage from '../pages/assets/AssetsPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
@@ -33,6 +35,7 @@ const ComponentGalleryPage = import.meta.env.DEV
 
 // Pages that are built. Every other page in PAGES shows "Coming soon".
 const BUILT_PAGES = {
+  '/assets': AssetsPage,
   '/categories': CategoriesPage,
   '/employees': EmployeesPage,
   '/inventory': InventoryPage,
@@ -45,6 +48,7 @@ const BUILT_PAGES = {
 const DETAIL_PAGES = [
   { path: '/vendors/:vendorId', parent: '/vendors', Page: VendorDetailPage },
   { path: '/purchases/:purchaseId', parent: '/purchases', Page: PurchaseDetailPage }, // Slice 3.4
+  { path: '/assets/:assetId', parent: '/assets', Page: AssetDetailPage }, // Slice 4.1
 ]
 
 function HomeRedirect() {

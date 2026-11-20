@@ -1,5 +1,6 @@
-"""Assets: read one, and the shared checks used when assets are created
-(Slice 3.2: receiving a purchase; Slice 4.5 will reuse them for manual entry).
+"""Assets: the asset register (list, search, filters, one asset and its history;
+Slice 4.1), and the shared checks used when assets are created (Slice 3.2:
+receiving a purchase; Slice 4.5 will reuse them for manual entry).
 
 RULES (AST-01, AST-02, AST-06, BR-01, P5)
 - The asset ID (AST-000001, ...) is made by the database sequence: never typed.
@@ -16,10 +17,15 @@ from collections.abc import Iterable
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.core.pagination import PageParams, paginate
+from app.modules.audit.models import AuditLog
+from app.modules.categories import service as categories_service
+from app.modules.categories.models import AssetCategory
+from app.modules.users.models import User
 from app.modules.assets.models import (
     ASSET_CODE_PREFIX,
     BRAND_MAX_LENGTH,
@@ -56,6 +62,94 @@ def get_asset(db: Session, ref: str | int) -> Asset:
     return asset
 
 
+# Columns the register can be sorted by. Text is sorted ignoring upper/lower case.
+# Rows with the same value are ordered by id in the same direction, so paging never
+# repeats or skips a row.
+_SORTABLE = {
+    "asset_code": Asset.asset_code,
+    "name": func.lower(Asset.name),
+    "category": func.lower(AssetCategory.name),
+    "brand": func.lower(Asset.brand),
+    "model": func.lower(Asset.model),
+    "serial_number": func.lower(Asset.serial_number),
+    "status": Asset.status,
+    "location": func.lower(Asset.location),
+    "warranty_expiry": Asset.warranty_expiry,
+    "created_at": Asset.created_at,
+}
+
+
+def list_assets(
+    db: Session,
+    params: PageParams,
+    *,
+    search: str | None = None,
+    category_id: int | None = None,
+    status: str | None = None,
+    location: str | None = None,
+) -> dict[str, Any]:
+    """The asset register (AST-03, AST-05): one sorted page of assets.
+
+    - `search` matches part of the asset ID, serial number or name, ignoring case.
+    - `category_id`: one category (active or inactive). Unknown: 404 `category_not_found`.
+    - `status`: one asset status (PRD 8.1).
+    - `location`: the whole location, ignoring case (typed text, Q1; like department, B23).
+    All filters combine (every one must match).
+    """
+    stmt: Select = select(Asset).join(AssetCategory, Asset.category_id == AssetCategory.id)
+    if search and search.strip():
+        term = search.strip().lower()
+        stmt = stmt.where(
+            func.lower(Asset.asset_code).contains(term, autoescape=True)
+            | func.lower(Asset.serial_number).contains(term, autoescape=True)
+            | func.lower(Asset.name).contains(term, autoescape=True)
+        )
+    if category_id is not None:
+        categories_service.get_category(db, category_id)  # 404 for an unknown category
+        stmt = stmt.where(Asset.category_id == category_id)
+    if status:
+        stmt = stmt.where(Asset.status == status)
+    if location and location.strip():
+        stmt = stmt.where(func.lower(Asset.location) == location.strip().lower())
+    return paginate(db, stmt, params, sortable=_SORTABLE, default_sort="-asset_code", tiebreaker=Asset.id)
+
+
+def list_locations(db: Session) -> list[str]:
+    """Every location already typed on an asset, A-Z, one spelling per location
+    ignoring case (for the location filter)."""
+    rows = db.scalars(
+        select(func.min(Asset.location))
+        .where(Asset.location.is_not(None))
+        .group_by(func.lower(Asset.location))
+        .order_by(func.lower(Asset.location))
+    )
+    return [r for r in rows if r]
+
+
+def asset_history(db: Session, asset: Asset, params: PageParams) -> dict[str, Any]:
+    """The asset's history: every audit log row about this asset (entity "assets"),
+    newest first, with who did it. Later slices (edit / retire, assign / return,
+    maintenance) add their own rows here automatically (BR-13)."""
+    stmt = select(AuditLog).where(AuditLog.entity_type == Asset.__tablename__, AuditLog.entity_id == str(asset.id))
+    page = paginate(
+        db, stmt, params, sortable={"created_at": AuditLog.created_at}, default_sort="-created_at", tiebreaker=AuditLog.id
+    )
+    actor_ids = {row.actor_user_id for row in page["items"] if row.actor_user_id is not None}
+    actors = {u.id: u for u in db.scalars(select(User).where(User.id.in_(actor_ids)))} if actor_ids else {}
+    page["items"] = [
+        {
+            "id": row.id,
+            "action": row.action,
+            "created_at": row.created_at,
+            "actor": actors.get(row.actor_user_id),
+            "before": row.before_data,
+            "after": row.after_data,
+        }
+        for row in page["items"]
+    ]
+    return page
+
+
 def purchase_summary(asset: Asset) -> dict[str, Any] | None:
     """Where the asset came from, for the API response (None when entered by hand)."""
     line = asset.purchase_line
@@ -66,6 +160,7 @@ def purchase_summary(asset: Asset) -> dict[str, Any] | None:
         "purchase_id": purchase.id,
         "purchase_number": purchase.purchase_number,
         "purchase_line_id": line.id,
+        "vendor_id": purchase.vendor_id,
         "vendor": purchase.vendor.name,
         "reference_number": purchase.reference_number,
     }

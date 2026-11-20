@@ -635,6 +635,7 @@ def test_get_one_asset_by_id_or_asset_id(client, manager, data):
         "purchase_id": purchase["id"],
         "purchase_number": purchase["purchase_number"],
         "purchase_line_id": purchase["lines"][0]["id"],
+        "vendor_id": data["acme"],  # added in Slice 4.1 (E7)
         "vendor": "Acme IT Supplies",
         "reference_number": "INV-2026-0042",
     }
@@ -648,10 +649,10 @@ def test_unknown_asset_is_404(client, manager, ref):
     assert response.status_code == 404 and error_code(response) == "asset_not_found"
 
 
-def test_there_is_no_asset_delete_or_list_yet(client, manager):
+def test_there_is_no_asset_delete(client, manager):
     _, headers = manager
     assert client.delete(f"{ASSETS}/1", headers=headers).status_code == 405
-    assert client.get(ASSETS, headers=headers).status_code in (404, 405)  # the register is Slice 4.1
+    # The asset register (GET /assets) exists since Slice 4.1: tests/test_asset_register.py.
 
 
 # ---- Database rules -----------------------------------------------------------------------------

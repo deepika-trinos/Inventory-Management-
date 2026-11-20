@@ -334,6 +334,24 @@ def test_list_search_filters_and_sort(client, manager, categories):
     assert client.get(ITEMS, headers=headers, params={"sort": "password"}).status_code == 400
 
 
+def test_equal_sort_values_are_ordered_by_id_and_paging_never_repeats(client, manager, categories):
+    """E10: items in the same category (or with the same threshold) keep their creation
+    order in the sort's direction, so the list is stable and pages never overlap."""
+    _, headers = manager
+    for name in ("Cable A", "Cable B", "Cable C", "Cable D"):  # same category, same threshold
+        create(client, headers, categories["Cables"], name=name, reorder_threshold=5)
+    create(client, headers, categories["Peripherals"], name="Mouse", reorder_threshold=5)
+
+    def names(**params):
+        return [i["name"] for i in client.get(ITEMS, headers=headers, params=params).json()["items"]]
+
+    assert names(sort="category") == ["Cable A", "Cable B", "Cable C", "Cable D", "Mouse"]
+    assert names(sort="-category") == ["Mouse", "Cable D", "Cable C", "Cable B", "Cable A"]
+    assert names(sort="reorder_threshold") == ["Cable A", "Cable B", "Cable C", "Cable D", "Mouse"]
+    pages = [names(sort="reorder_threshold", page=p, page_size=2) for p in (1, 2, 3)]
+    assert sum(pages, []) == ["Cable A", "Cable B", "Cable C", "Cable D", "Mouse"]
+
+
 def test_get_one_and_404(client, manager, categories):
     _, headers = manager
     iid = create(client, headers, categories["Peripherals"]).json()["id"]
