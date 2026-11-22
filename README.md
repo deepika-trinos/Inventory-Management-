@@ -20,7 +20,7 @@ page, each vendor's purchase history). See
 inventory operations) started:** the asset register (4.1: **Assets** page with search by asset
 ID, serial number or name, category / status / location filters and server-side paging; asset
 page `/assets/AST-000001` with details, purchase and history) is signed off (2026-11-20). Next:
-Slice 4.2 (edit and retire assets; owner answers A2–A3 needed first).
+Slice 4.2 (edit and retire assets; owner answers A2–A3 recorded in decisions.md section 19).
 Business pages not built yet show "Coming soon" until their phase.
 
 ---
