@@ -18,13 +18,15 @@ also counted as stock (stock_items are for "by quantity" categories only).
   New assets start as AVAILABLE. Status changes only through actions (AST-07):
   assign / return (Phase 5), maintenance (Phase 6), retire (Slice 4.2).
 - Never deleted (BR-12): a wrong asset is retired (Slice 4.2, P6).
+- retired_at / retired_by_user_id / retire_reason (Slice 4.2, migration 0012, F2):
+  who retired it, when, and why. Empty unless the asset is retired (check constraint).
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Numeric, Sequence, String, func, text
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, Sequence, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampMixin
@@ -53,6 +55,7 @@ SERIAL_MAX_LENGTH = 100
 MODEL_MAX_LENGTH = 100
 BRAND_MAX_LENGTH = 100
 LOCATION_MAX_LENGTH = 200
+RETIRE_REASON_MAX_LENGTH = 500  # A3
 
 # The sequence behind AST-000001, AST-000002, ... (migration 0009). Owned by
 # assets.asset_code, so it is dropped with the table.
@@ -70,6 +73,10 @@ class Asset(TimestampMixin, Base):
         CheckConstraint("length(trim(serial_number)) > 0", name="serial_number_not_blank"),
         CheckConstraint("length(trim(model)) > 0", name="model_not_blank"),
         CheckConstraint("cost IS NULL OR cost >= 0", name="cost_not_negative"),
+        CheckConstraint(
+            "status = 'retired' OR (retired_at IS NULL AND retired_by_user_id IS NULL AND retire_reason IS NULL)",
+            name="retired_details_only_when_retired",
+        ),
     )
     # Read the database-made asset_code back right after the INSERT.
     __mapper_args__ = {"eager_defaults": True}
@@ -101,9 +108,14 @@ class Asset(TimestampMixin, Base):
     created_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    # Retirement (Slice 4.2): filled together, in the same transaction as the asset.retired audit row.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    retire_reason: Mapped[str | None] = mapped_column(String(RETIRE_REASON_MAX_LENGTH))
 
     category: Mapped[AssetCategory] = relationship(lazy="joined")
-    created_by: Mapped[User] = relationship(lazy="joined")
+    created_by: Mapped[User] = relationship(lazy="joined", foreign_keys=[created_by_user_id])
+    retired_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[retired_by_user_id])
     purchase_line: Mapped["PurchaseLine | None"] = relationship(back_populates="assets")
 
     def __repr__(self) -> str:

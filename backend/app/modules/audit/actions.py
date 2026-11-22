@@ -43,6 +43,7 @@ class AuditAction:
 
     # Assets
     ASSET_CREATED = "asset.created"  # Slices 3.2, 4.5
+    ASSET_UPDATED = "asset.updated"  # Slice 4.2
     ASSET_RETIRED = "asset.retired"  # Slice 4.2
 
     # Assignments

@@ -1,8 +1,8 @@
 """Response shapes for assets (Slice 3.2; asset register Slice 4.1).
 
-Reading only: one asset (with where it came from), the asset register (list,
-search, filters) and an asset's history. Editing and retiring come in Slice 4.2;
-manual entry in Slice 4.5.
+Reading: one asset (with where it came from), the asset register (list, search,
+filters) and an asset's history. Slice 4.2: editing the allowed details and
+retiring. Manual entry comes in Slice 4.5.
 """
 
 from datetime import date, datetime
@@ -72,6 +72,34 @@ class AssetRead(BaseModel):
     created_by: AssetUserSummary
     created_at: datetime
     updated_at: datetime
+    retired_at: datetime | None = Field(default=None, description="When it was retired (Slice 4.2).")
+    retired_by: AssetUserSummary | None = Field(default=None, description="Who retired it.")
+    retire_reason: str | None = Field(default=None, description="Why it was retired (required when retiring).")
+
+
+class AssetUpdate(BaseModel):
+    """Edit an asset (Slice 4.2, owner's answer A2). Send only the fields to change;
+    `null` clears brand, location or warranty expiry. Any other field (status,
+    category, purchase date, cost, asset ID, ...) is refused with 422
+    `validation_error`: status changes only through actions (AST-07) and the purchase
+    facts of a received asset are locked."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=1000)
+    brand: str | None = Field(default=None, max_length=1000)
+    model: str | None = Field(default=None, max_length=1000)
+    serial_number: str | None = Field(default=None, max_length=1000)
+    location: str | None = Field(default=None, max_length=1000)
+    warranty_expiry: date | None = None
+
+
+class AssetRetire(BaseModel):
+    """Retire an asset (Slice 4.2, A3): the reason is required, up to 500 characters."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=5000, description="Why it is retired (required).")
 
 
 class AssetListItem(BaseModel):

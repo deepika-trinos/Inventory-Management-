@@ -1,6 +1,6 @@
 // Calls to the asset endpoints (/api/v1/assets). Admin and IT Manager only.
 // Slice 3.2: get one asset. Slice 4.1: the asset register (list, search, filters),
-// the locations in use, and an asset's history.
+// the locations in use, and an asset's history. Slice 4.2: edit and retire.
 import apiClient from './client'
 
 const BASE = '/api/v1/assets'
@@ -47,6 +47,22 @@ export async function getAsset(ref) {
   return data
 }
 
+// Statuses an asset can be retired from (owner's answer A3).
+export const RETIRABLE_STATUSES = ['available', 'damaged']
+
+// Edit the allowed details (A2). changes: any of { name, brand, model, serial_number,
+// location, warranty_expiry }; null clears brand, location or warranty_expiry.
+export async function updateAsset(ref, changes) {
+  const { data } = await apiClient.patch(`${BASE}/${encodeURIComponent(ref)}`, changes)
+  return data
+}
+
+// Retire permanently (A3): reason is required, up to 500 characters. Cannot be undone.
+export async function retireAsset(ref, reason) {
+  const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(ref)}/retire`, { reason })
+  return data
+}
+
 // The asset's history (its audit log entries), newest first: { items, total, page, page_size }.
 export async function getAssetHistory(ref, { page = 1, pageSize = 20, sort } = {}) {
   const params = { page, page_size: pageSize }
@@ -59,6 +75,7 @@ export async function getAssetHistory(ref, { page = 1, pageSize = 20, sort } = {
 // 5.x assign / return, 6.x maintenance); an unknown action shows as it is stored.
 const HISTORY_ACTION_LABELS = {
   'asset.created': 'Created',
+  'asset.updated': 'Edited',
   'asset.retired': 'Retired',
 }
 

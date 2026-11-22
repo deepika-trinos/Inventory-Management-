@@ -1,6 +1,6 @@
 """Assets: the asset register (list, search, filters, one asset and its history;
-Slice 4.1), and the shared checks used when assets are created (Slice 3.2:
-receiving a purchase; Slice 4.5 will reuse them for manual entry).
+Slice 4.1), editing and retiring (Slice 4.2), and the shared checks used when
+assets are created (Slice 3.2: receiving a purchase; Slice 4.5 will reuse them).
 
 RULES (AST-01, AST-02, AST-06, BR-01, P5)
 - The asset ID (AST-000001, ...) is made by the database sequence: never typed.
@@ -11,6 +11,18 @@ RULES (AST-01, AST-02, AST-06, BR-01, P5)
   first to give a clear error; the unique index uq_assets_serial_number_lower is
   the final guard when two receipts are saved at the same moment.
 - Assets are never deleted (BR-12). There is no delete function and no DELETE endpoint.
+
+EDITING AND RETIRING (Slice 4.2, AST-04, AST-07, BR-13; owner's answers A2, A3)
+- Editable: name, brand, model, serial number (still unique), location, warranty
+  expiry (still not before the purchase date, B61). Category, purchase link,
+  purchase date and cost are locked (they come from the invoice; manual-entry
+  editing arrives with Slice 4.5, F1). Asset ID and status are never edited:
+  status changes only through actions (AST-07).
+- Retire only from Available or Damaged, with a required reason (free text, up
+  to 500 characters). Retiring cannot be undone; a retired asset is read-only.
+- Every change writes its audit row in the same transaction (asset.updated with
+  the old and new value of each changed field; asset.retired with the reason).
+  A failure saves nothing.
 """
 
 from collections.abc import Iterable
@@ -18,10 +30,14 @@ from datetime import date
 from typing import Any
 
 from sqlalchemy import Select, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
+from app.modules.audit import service as audit
+from app.modules.audit.actions import AuditAction
+from app.modules.audit.service import AuditContext
 from app.modules.audit.models import AuditLog
 from app.modules.categories import service as categories_service
 from app.modules.categories.models import AssetCategory
@@ -32,8 +48,10 @@ from app.modules.assets.models import (
     LOCATION_MAX_LENGTH,
     MODEL_MAX_LENGTH,
     NAME_MAX_LENGTH,
+    RETIRE_REASON_MAX_LENGTH,
     SERIAL_MAX_LENGTH,
     Asset,
+    AssetStatus,
 )
 
 # Name of the unique index on lower(serial_number) (migration 0009).
@@ -242,3 +260,179 @@ def serials_in_use(db: Session, serials: Iterable[str]) -> set[str]:
         return set()
     found = db.scalars(select(func.lower(Asset.serial_number)).where(func.lower(Asset.serial_number).in_(wanted)))
     return set(found)
+
+
+# ---- Editing and retiring (Slice 4.2) ----------------------------------------------------
+EDITABLE_FIELDS = ("name", "brand", "model", "serial_number", "location", "warranty_expiry")
+RETIRABLE_STATUSES = (AssetStatus.AVAILABLE, AssetStatus.DAMAGED)  # A3
+
+_STATUS_LABELS = {
+    AssetStatus.AVAILABLE: "Available",
+    AssetStatus.ASSIGNED: "Assigned",
+    AssetStatus.UNDER_MAINTENANCE: "Under Maintenance",
+    AssetStatus.DAMAGED: "Damaged",
+    AssetStatus.RETIRED: "Retired",
+}
+_NOT_RETIRABLE_HINTS = {
+    AssetStatus.ASSIGNED: "Return it first.",
+    AssetStatus.UNDER_MAINTENANCE: "Finish the repair first.",
+}
+
+
+def _lock(db: Session, asset: Asset) -> Asset:
+    """Row-lock the asset and reload its current values, so two people editing or
+    retiring at the same moment cannot both act on an out-of-date status."""
+    stmt = (
+        select(Asset)
+        .where(Asset.id == asset.id)
+        .with_for_update(of=Asset)  # lock only the asset row, not the joined user / category rows
+        .execution_options(populate_existing=True)
+    )
+    return db.scalars(stmt).one()
+
+
+def _ensure_not_retired(asset: Asset) -> None:
+    if asset.status == AssetStatus.RETIRED:
+        raise AppError(409, "asset_retired", f"{asset.asset_code} is retired. A retired asset cannot be changed.")
+
+
+def _commit(db: Session) -> None:
+    """Commit; a serial number saved by someone else at the same moment becomes the normal 409."""
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if SERIAL_INDEX in str(exc.orig):
+            raise serial_taken_error() from None
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+# field: (required, max length, error code, label)
+_EDIT_TEXT_RULES = {
+    "name": (True, NAME_MAX_LENGTH, "invalid_asset_name", "asset name"),
+    "serial_number": (True, SERIAL_MAX_LENGTH, "invalid_serial_number", "serial number"),
+    "model": (True, MODEL_MAX_LENGTH, "invalid_model", "model"),
+    "brand": (False, BRAND_MAX_LENGTH, "invalid_brand", "brand"),
+    "location": (False, LOCATION_MAX_LENGTH, "invalid_location", "location"),
+}
+
+
+def _clean_edit(field: str, value: Any, asset: Asset) -> Any:
+    """Check and tidy one edited value (the same rules as when the asset was created)."""
+    if field == "warranty_expiry":
+        if value is not None and asset.purchase_date is not None and value < asset.purchase_date:
+            raise AppError(
+                422,
+                "invalid_warranty_expiry",
+                f"The warranty expiry cannot be before the purchase date ({asset.purchase_date.isoformat()}).",
+            )
+        return value
+    required, max_length, code, label = _EDIT_TEXT_RULES[field]
+    return _text(value, required=required, max_length=max_length, code=code, label=label)
+
+
+def update_asset(
+    db: Session,
+    *,
+    actor: User,
+    asset: Asset,
+    changes: dict[str, Any],
+    context: AuditContext | None = None,
+) -> Asset:
+    """Change the editable details (A2). `changes` holds only the fields sent; null
+    clears an optional field (brand, location, warranty) and is refused for a
+    required one (name, model, serial number).
+
+    Errors: 409 `asset_retired`; 409 `serial_number_taken`; 422 `invalid_*`.
+    Nothing changed: nothing saved and no audit row (same as other records, B16)."""
+    asset = _lock(db, asset)
+    try:
+        _ensure_not_retired(asset)
+        new_values: dict[str, Any] = {}
+        for field, value in changes.items():
+            cleaned = _clean_edit(field, value, asset)
+            if cleaned != getattr(asset, field):
+                new_values[field] = cleaned
+        serial = new_values.get("serial_number")
+        if serial is not None and serial.lower() != asset.serial_number.lower():
+            clash = db.scalar(
+                select(Asset.id).where(func.lower(Asset.serial_number) == serial.lower(), Asset.id != asset.id)
+            )
+            if clash is not None:
+                raise serial_taken_error(serial)
+    except Exception:
+        db.rollback()  # releases the row lock; nothing was changed
+        raise
+    if not new_values:
+        db.rollback()
+        return asset
+
+    before = {field: getattr(asset, field) for field in new_values}
+    for field, value in new_values.items():
+        setattr(asset, field, value)
+    try:
+        audit.record(
+            db, actor=actor, action=AuditAction.ASSET_UPDATED, entity=asset,
+            before=before, after=dict(new_values), context=context,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    _commit(db)
+    db.refresh(asset)
+    return asset
+
+
+def retire_asset(
+    db: Session,
+    *,
+    actor: User,
+    asset: Asset,
+    reason: str | None,
+    context: AuditContext | None = None,
+) -> Asset:
+    """Retire the asset (AST-07, A3): only from Available or Damaged, with a required
+    reason. Stores who, when and why on the asset (F2) and writes asset.retired, all in
+    one transaction. Cannot be undone.
+
+    Errors: 409 `asset_retired` (already retired); 409 `asset_not_retirable` (Assigned
+    or Under Maintenance, `details.status`); 422 `invalid_retire_reason`."""
+    asset = _lock(db, asset)
+    try:
+        _ensure_not_retired(asset)
+        if asset.status not in RETIRABLE_STATUSES:
+            label = _STATUS_LABELS.get(asset.status, asset.status)
+            hint = _NOT_RETIRABLE_HINTS.get(asset.status, "")
+            raise AppError(
+                409,
+                "asset_not_retirable",
+                f"{asset.asset_code} is {label}. Only Available or Damaged assets can be retired. {hint}".strip(),
+                {"status": asset.status},
+            )
+        clean_reason = _text(
+            reason, required=True, max_length=RETIRE_REASON_MAX_LENGTH,
+            code="invalid_retire_reason", label="reason for retiring",
+        )
+    except Exception:
+        db.rollback()  # releases the row lock; nothing was changed
+        raise
+
+    before = {"status": asset.status}
+    asset.status = AssetStatus.RETIRED
+    asset.retired_by_user_id = actor.id
+    asset.retired_at = func.now()  # database time, like the audit row
+    asset.retire_reason = clean_reason
+    try:
+        audit.record(
+            db, actor=actor, action=AuditAction.ASSET_RETIRED, entity=asset,
+            before=before, after={"status": AssetStatus.RETIRED, "reason": clean_reason}, context=context,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    _commit(db)
+    db.refresh(asset)
+    return asset

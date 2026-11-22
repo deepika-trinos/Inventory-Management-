@@ -1,18 +1,23 @@
 // Tests for the asset page /assets/:assetId (Slice 4.1, AST-02, AST-05): details,
 // purchase (with links) or "entered by hand", who created it and when, the history
 // (audit log entries, newest first), and the loading, not-found and error states.
+// Slice 4.2: Edit and Retire… buttons, a retired asset's read-only view with who / when /
+// why, Retire… only for Available or Damaged, and the history note for each edit.
 // The server is replaced by stand-ins (no network). Run with: npm test
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getAsset, getAssetHistory } from '../../api/assets'
+import { getAsset, getAssetHistory, retireAsset, updateAsset } from '../../api/assets'
+import { NotificationProvider } from '../../context/NotificationContext'
 import AssetDetailPage, { historyNote } from './AssetDetailPage'
 
 vi.mock('../../api/assets', async (importOriginal) => ({
   ...(await importOriginal()),
   getAsset: vi.fn(),
   getAssetHistory: vi.fn(),
+  updateAsset: vi.fn(),
+  retireAsset: vi.fn(),
 }))
 
 const USER = { id: 2, email: 'manager@example.com' }
@@ -48,11 +53,13 @@ beforeEach(() => {
 
 function renderPage(path = '/assets/AST-000001') {
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/assets/:assetId" element={<AssetDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <NotificationProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/assets/:assetId" element={<AssetDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </NotificationProvider>,
   )
 }
 
@@ -135,5 +142,80 @@ describe('AssetDetailPage', () => {
     getAsset.mockRejectedValue({ response: { status: 500, data: { error: { code: 'internal_error', message: 'Something went wrong.' } } } })
     renderPage()
     expect(await screen.findByRole('button', { name: /try again|retry/i })).toBeTruthy()
+  })
+
+  // ---- Slice 4.2 ------------------------------------------------------------------------
+  it('an available asset shows Edit and Retire… buttons', async () => {
+    renderPage()
+    await screen.findByRole('heading', { name: 'Asset AST-000001' })
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retire…' }).disabled).toBe(false)
+  })
+
+  it.each(['assigned', 'under_maintenance'])('a %s asset can be edited but not retired', async (status) => {
+    getAsset.mockResolvedValue({ ...ASSET, status })
+    renderPage()
+    await screen.findByRole('heading', { name: 'Asset AST-000001' })
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retire…' }).disabled).toBe(true)
+  })
+
+  it('a retired asset is read-only and shows who retired it, when and why', async () => {
+    getAsset.mockResolvedValue({
+      ...ASSET, status: 'retired', retired_by: USER, retired_at: '2026-11-22T06:30:00Z', retire_reason: 'Stolen from the Chennai office',
+    })
+    renderPage()
+    await screen.findByRole('heading', { name: 'Asset AST-000001' })
+
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retire…' })).toBeNull()
+    expect(screen.getByText('Retired assets are final. Read-only.')).toBeTruthy()
+    expect(screen.getByTestId('asset-retired-by').textContent).toContain('manager@example.com')
+    expect(screen.getByTestId('asset-retired-by').textContent).toContain('22 Nov 2026')
+    expect(screen.getByTestId('asset-retire-reason').textContent).toContain('Stolen from the Chennai office')
+  })
+
+  it('editing saves, shows the new values and reloads the history', async () => {
+    updateAsset.mockResolvedValue({ ...ASSET, location: 'Chennai' })
+    renderPage()
+    await screen.findByRole('heading', { name: 'Asset AST-000001' })
+    const historyCalls = getAssetHistory.mock.calls.length
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('Location'), { target: { value: 'Chennai' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(updateAsset).toHaveBeenCalledWith('AST-000001', expect.objectContaining({ location: 'Chennai' }))
+    expect(section('Details').getByText('Chennai')).toBeTruthy()
+    expect(await screen.findByText('AST-000001 saved.')).toBeTruthy()
+    await waitFor(() => expect(getAssetHistory.mock.calls.length).toBeGreaterThan(historyCalls))
+  })
+
+  it('retiring shows the retired view afterwards', async () => {
+    retireAsset.mockResolvedValue({ ...ASSET, status: 'retired', retired_by: USER, retired_at: '2026-11-22T06:30:00Z', retire_reason: 'End of life' })
+    renderPage()
+    await screen.findByRole('heading', { name: 'Asset AST-000001' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retire…' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText(/Reason for retiring/), { target: { value: 'End of life' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Retire asset' }))
+
+    expect(await screen.findByText('Retired assets are final. Read-only.')).toBeTruthy()
+    expect(retireAsset).toHaveBeenCalledWith('AST-000001', 'End of life')
+    expect(screen.getByTestId('asset-retire-reason').textContent).toContain('End of life')
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+  })
+
+  it('history notes: each edited field with old and new value', () => {
+    expect(historyNote({
+      action: 'asset.updated',
+      before: { location: 'Bangalore Floor 2', serial_number: 'DL-1O01', warranty_expiry: null },
+      after: { location: 'Chennai', serial_number: 'DL-1001', warranty_expiry: '2030-01-31' },
+    })).toBe('Location: Bangalore Floor 2 → Chennai; Serial number: DL-1O01 → DL-1001; Warranty expiry: (empty) → 31 Jan 2030')
+    expect(historyNote({ action: 'asset.retired', before: { status: 'available' }, after: { status: 'retired', reason: 'End of life' } }))
+      .toBe('Reason: End of life')
   })
 })

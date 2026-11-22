@@ -212,6 +212,7 @@ def test_action_list_has_the_agreed_names():
         "category.created", "category.updated", "category.activated", "category.deactivated",  # Slice 2.1
         "purchase.created", "purchase.updated",  # Slice 3.1
         "purchase.received", "purchase.cancelled", "asset.created",
+        "asset.updated",  # Slice 4.2 (edit an asset)
         "asset.retired", "assignment.created", "assignment.returned", "stock.issued",
         "stock.adjusted",
         "stock_item.created", "stock_item.updated", "stock_item.activated", "stock_item.deactivated",  # Slice 2.4

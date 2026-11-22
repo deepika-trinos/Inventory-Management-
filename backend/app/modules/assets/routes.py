@@ -3,9 +3,9 @@
 ADMIN AND IT MANAGER ONLY: an Employee gets 403. (Employees see their own assigned
 assets on "My Assets", Slice 6.4.)
 
-Reading only: the asset register (list with search and filters), the locations in
-use, one asset, and its history. Edit and retire are Slice 4.2. There is
-deliberately NO delete endpoint (BR-12).
+The asset register (list with search and filters), the locations in use, one
+asset and its history (Slice 4.1); editing the allowed details and retiring
+(Slice 4.2). There is deliberately NO delete endpoint (BR-12).
 """
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -15,20 +15,26 @@ from app.core.database import get_db
 from app.core.errors import error_responses
 from app.core.pagination import PageParams, page_params
 from app.modules.assets import service
+from app.modules.assets.models import Asset
 from app.modules.assets.schemas import (
     AssetHistoryPage,
     AssetPage,
     AssetPurchaseSummary,
     AssetRead,
+    AssetRetire,
     AssetStatusField,
+    AssetUpdate,
 )
+from app.modules.audit.service import AuditContext, get_audit_context
 from app.modules.auth.dependencies import require_roles
-from app.modules.users.models import RoleName
+from app.modules.users.models import RoleName, User
+
+require_staff = require_roles(RoleName.ADMIN, RoleName.IT_MANAGER)
 
 router = APIRouter(
     prefix="/assets",
     tags=["assets"],
-    dependencies=[Depends(require_roles(RoleName.ADMIN, RoleName.IT_MANAGER))],
+    dependencies=[Depends(require_staff)],
     responses=error_responses(401, 403),
 )
 
@@ -84,8 +90,58 @@ def get_asset(
     """One asset by id or asset ID, with where it came from (purchase number, vendor,
     invoice / reference; empty for manual entry) and who created it, and when.
     Unknown: **404** `asset_not_found`."""
-    asset = service.get_asset(db, asset_ref)
+    return _read(service.get_asset(db, asset_ref))
+
+
+def _read(asset: Asset) -> AssetRead:
+    """One asset as the API returns it, with where it came from."""
     summary = service.purchase_summary(asset)
     return AssetRead.model_validate(asset).model_copy(
         update={"purchase": AssetPurchaseSummary(**summary) if summary else None}
     )
+
+
+@router.patch(
+    "/{asset_ref}", response_model=AssetRead, summary="Edit an asset", responses=error_responses(404, 409, 422)
+)
+def update_asset(
+    body: AssetUpdate,
+    asset_ref: str = AssetRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> AssetRead:
+    """Change the editable details (owner's answer A2): name, brand, model, serial
+    number, location, warranty expiry. Send only what changes; `null` clears brand,
+    location or warranty expiry.
+
+    - Status, category, purchase date, cost or any other field: **422** `validation_error`
+    - Retired asset: **409** `asset_retired`
+    - Serial number used by another asset (any case): **409** `serial_number_taken`
+    - Empty name / model / serial, too long, warranty before the purchase date: **422** `invalid_*`
+    - Writes audit action `asset.updated` (old and new value of each changed field)."""
+    asset = service.get_asset(db, asset_ref)
+    changes = body.model_dump(exclude_unset=True)  # only what was actually sent
+    return _read(service.update_asset(db, actor=user, asset=asset, changes=changes, context=context))
+
+
+@router.post(
+    "/{asset_ref}/retire", response_model=AssetRead, summary="Retire an asset",
+    responses=error_responses(404, 409, 422),
+)
+def retire_asset(
+    body: AssetRetire,
+    asset_ref: str = AssetRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> AssetRead:
+    """Retire the asset permanently (owner's answer A3). Cannot be undone; a retired
+    asset can no longer be edited.
+
+    - Only from Available or Damaged; Assigned or Under Maintenance: **409** `asset_not_retirable`
+    - Already retired: **409** `asset_retired`
+    - Missing or too long reason (max 500): **422** `invalid_retire_reason`
+    - Writes audit action `asset.retired` with the reason."""
+    asset = service.get_asset(db, asset_ref)
+    return _read(service.retire_asset(db, actor=user, asset=asset, reason=body.reason, context=context))
