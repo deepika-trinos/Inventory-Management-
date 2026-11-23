@@ -25,6 +25,7 @@ from app.modules.inventory.schemas import (
     StockItemCreate,
     StockItemPage,
     StockMovementPage,
+    StockOpening,
     StockItemRead,
     StockItemStatusField,
     StockItemUpdate,
@@ -163,6 +164,31 @@ def adjust_stock(
     item, movement = service.adjust_stock(
         db, actor=user, item_id=item_id, direction=body.direction, quantity=body.quantity,
         reason=body.reason, movement_date=body.movement_date, context=context,
+    )
+    return _change_result(item, movement)
+
+
+@router.post(
+    "/{item_id}/opening-stock", response_model=StockChangeResult, summary="Enter opening stock",
+    responses=error_responses(404, 409, 422),
+)
+def enter_opening_stock(
+    item_id: int,
+    body: StockOpening,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Stock already on the shelf when the system starts (Slice 4.5, INV-01, Q4; owner's
+    answer A6): `quantity`, optional `movement_date` (today by default, never future) and
+    optional `note`. Once per item, only while it has no movements. Audit `stock.opening`.
+
+    - The item already has a movement: **409** `opening_stock_not_allowed`
+    - Inactive item: **409** `stock_item_inactive`; unknown item: **404** `stock_item_not_found`
+    - Note over 500 characters: **422** `invalid_reason`; future date: **422** `movement_date_in_future`"""
+    item, movement = service.enter_opening_stock(
+        db, actor=user, item_id=item_id, quantity=body.quantity, note=body.note,
+        movement_date=body.movement_date, context=context,
     )
     return _change_result(item, movement)
 

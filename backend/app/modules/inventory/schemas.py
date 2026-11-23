@@ -124,6 +124,17 @@ class StockAdjust(BaseModel):
     movement_date: date | None = Field(default=None, description="Default: today. Earlier allowed, future refused.")
 
 
+class StockOpening(BaseModel):
+    """Opening stock (Slice 4.5; owner's answer A6): the count already on the shelf when the
+    system starts. Allowed once, only while the item has no movements at all."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: int = Field(gt=0, le=MAX_CHANGE_QUANTITY, description="Whole number above 0.")
+    movement_date: date | None = Field(default=None, description="Default: today. Earlier allowed, future refused.")
+    note: str | None = Field(default=None, max_length=5000, description="Optional, up to 500 characters.")
+
+
 class StockMovementPage(BaseModel):
     items: list[StockMovementRead]
     total: int

@@ -454,6 +454,26 @@ def _change_reason(value: str | None) -> str:
     return reason
 
 
+def _optional_note(value: str | None) -> str | None:
+    """The optional note on opening stock (A6): trimmed, up to 500 characters."""
+    note = optional_text(value)
+    if note is not None and len(note) > REASON_MAX_LENGTH:
+        raise AppError(422, "invalid_reason", f"The note can be at most {REASON_MAX_LENGTH} characters.")
+    return note
+
+
+def _ensure_no_movements(db: Session, item: StockItem) -> None:
+    """Opening stock is allowed once, only while the item has no movements at all (A6).
+    The item row is locked, so two opening entries at the same moment cannot both pass."""
+    has_any = db.scalar(select(StockMovement.id).where(StockMovement.stock_item_id == item.id).limit(1))
+    if has_any is not None:
+        raise AppError(
+            409, "opening_stock_not_allowed",
+            f'Stock item "{item.name}" already has stock movements. Opening stock can only be entered once, '
+            "before any other movement; correct the balance with Adjust instead.",
+        )
+
+
 def _locked_usable_item(db: Session, item_id: int) -> StockItem:
     """Row-lock the item (C11) and refuse an inactive one (B38, B41)."""
     item = lock_stock_items(db, [item_id])[item_id]
@@ -488,15 +508,18 @@ def _change_stock(
     employee_id: int | None,
     action: str,
     context: AuditContext | None,
+    reason_required: bool = True,
 ) -> tuple[StockItem, StockMovement]:
-    """The one path for issues and adjustments: lock the item, check everything, write the
+    """The one path for issues, adjustments and opening stock: lock the item, check everything, write the
     movement + new balance (record_movement) and the audit row, then commit. Any failure
     rolls everything back, so nothing is saved."""
     try:
         item = _locked_usable_item(db, item_id)
+        if movement_type == MovementType.OPENING:
+            _ensure_no_movements(db, item)
         employee = _issue_employee(db, employee_id)
         when = _change_date(movement_date)
-        clean_reason = _change_reason(reason)
+        clean_reason = _change_reason(reason) if reason_required else _optional_note(reason)
         before = {"quantity_on_hand": item.quantity_on_hand}
         movement = record_movement(
             db, item=item, movement_type=movement_type, quantity=quantity, movement_date=when,
@@ -559,4 +582,24 @@ def adjust_stock(
     return _change_stock(
         db, actor=actor, item_id=item_id, movement_type=movement_type, quantity=quantity, reason=reason,
         movement_date=movement_date, employee_id=None, action=AuditAction.STOCK_ADJUSTED, context=context,
+    )
+
+
+def enter_opening_stock(
+    db: Session,
+    *,
+    actor: User,
+    item_id: int,
+    quantity: int,
+    note: str | None = None,
+    movement_date: date | None = None,
+    context: AuditContext | None = None,
+) -> tuple[StockItem, StockMovement]:
+    """Opening stock (Slice 4.5, INV-01, Q4; owner's answer A6): an `opening` movement of N
+    on an ACTIVE item that has NO movements yet (else 409 `opening_stock_not_allowed`);
+    optional note; audit `stock.opening`; one transaction, a failure saves nothing."""
+    return _change_stock(
+        db, actor=actor, item_id=item_id, movement_type=MovementType.OPENING, quantity=quantity, reason=note,
+        movement_date=movement_date, employee_id=None, action=AuditAction.STOCK_OPENING, context=context,
+        reason_required=False,
     )

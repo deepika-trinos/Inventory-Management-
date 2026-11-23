@@ -6,13 +6,14 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { listEmployees } from '../../api/employees'
-import { adjustStock, issueStock } from '../../api/stockItems'
+import { adjustStock, enterOpeningStock, issueStock } from '../../api/stockItems'
 import StockChangeDialog, { stockChange, validateStockChange } from './StockChangeDialog'
 
 vi.mock('../../api/stockItems', async (importOriginal) => ({
   ...(await importOriginal()),
   issueStock: vi.fn(),
   adjustStock: vi.fn(),
+  enterOpeningStock: vi.fn(),
 }))
 vi.mock('../../api/employees', async (importOriginal) => ({ ...(await importOriginal()), listEmployees: vi.fn() }))
 
@@ -27,8 +28,8 @@ beforeEach(() => {
   listEmployees.mockResolvedValue({ items: [ASHA], total: 1, page: 1, page_size: 20 })
 })
 
-function renderDialog(mode) {
-  render(<StockChangeDialog open mode={mode} item={ITEM} onClose={vi.fn()} onSaved={onSaved} />)
+function renderDialog(mode, item = ITEM) {
+  render(<StockChangeDialog open mode={mode} item={item} onClose={vi.fn()} onSaved={onSaved} />)
 }
 
 const form = () => within(screen.getByRole('dialog'))
@@ -169,5 +170,55 @@ describe('validation helpers', () => {
     expect(stockChange('issue', 'remove', 3)).toBe(-3)
     expect(stockChange('adjust', 'add', 3)).toBe(3)
     expect(stockChange('adjust', 'remove', 3)).toBe(-3)
+  })
+})
+
+// Slice 4.5 (INV-01; owner's answer A6): opening stock, once, with a confirm box 0 -> N.
+describe('StockChangeDialog: Opening stock', () => {
+  const CABLE = { ...ITEM, id: 8, name: 'HDMI cable', quantity_on_hand: 0 }
+
+  it('the note is optional; the confirm box shows 0 → N', async () => {
+    enterOpeningStock.mockResolvedValue({ item: { ...CABLE, quantity_on_hand: 40 }, movement: { quantity: 40, movement_type: 'opening', direction: 'in' } })
+    renderDialog('opening', CABLE)
+    expect(form().getByLabelText(/^Note/)).toBeTruthy()
+    expect(form().queryByRole('radio')).toBeNull()
+    fill(/^Quantity/, '40')
+    fireEvent.click(form().getByRole('button', { name: 'Continue…' }))
+
+    const confirm = within(await screen.findByRole('dialog', { name: 'Enter opening stock of 40 pieces for HDMI cable?' }))
+    expect(confirm.getByText('On hand: 0 → 40 pieces.')).toBeTruthy()
+    fireEvent.click(confirm.getByRole('button', { name: 'Enter opening stock' }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(enterOpeningStock).toHaveBeenCalledWith(8, { quantity: 40, note: '', movementDate: expect.any(String) })
+  })
+
+  it('sends a typed note and refuses a future date or a bad quantity first', async () => {
+    renderDialog('opening', CABLE)
+    fill(/^Quantity/, '0')
+    fill(/^Date/, '2999-01-01')
+    fireEvent.click(form().getByRole('button', { name: 'Continue…' }))
+    expect(await screen.findByText('Enter a whole number, 1 or more.')).toBeTruthy()
+    expect(screen.getByText('The date cannot be in the future.')).toBeTruthy()
+    expect(enterOpeningStock).not.toHaveBeenCalled()
+  })
+
+  it('a refusal (already has movements) is shown on the form', async () => {
+    enterOpeningStock.mockRejectedValue({
+      response: { status: 409, data: { error: { code: 'opening_stock_not_allowed', message: 'Stock item "HDMI cable" already has stock movements.' } } },
+    })
+    renderDialog('opening', CABLE)
+    fill(/^Quantity/, '5')
+    fill(/^Note/, ' First count ')
+    fireEvent.click(form().getByRole('button', { name: 'Continue…' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: /Enter opening stock of 5/ })).getByRole('button', { name: 'Enter opening stock' }))
+
+    expect(await screen.findByText('Stock item "HDMI cable" already has stock movements.')).toBeTruthy()
+    expect(enterOpeningStock).toHaveBeenCalledWith(8, expect.objectContaining({ note: 'First count' }))
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('validation: the note is not required for opening stock', () => {
+    expect(validateStockChange({ mode: 'opening', direction: 'add', quantity: '3', reason: '', movementDate: TODAY }, 0, TODAY)).toEqual({})
   })
 })

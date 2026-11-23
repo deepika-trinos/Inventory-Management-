@@ -8,12 +8,15 @@
 // Slice 4.4 (INV-04; A4, A5, A4-5b): "Issue…" and "Adjust…" open StockChangeDialog (form,
 // then a confirm box with the balance now and after); the page and history update after.
 // Inactive items cannot be issued or adjusted (B38), so both are greyed out for them.
+// Slice 4.5 (INV-01; A6): "Enter opening stock…" appears only while the item is active and
+// has no movements at all; it opens StockChangeDialog in opening mode (confirm box 0 -> N).
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
+import InventoryOutlined from '@mui/icons-material/Inventory2Outlined'
 import OutboxOutlined from '@mui/icons-material/OutboxOutlined'
 import TuneOutlined from '@mui/icons-material/TuneOutlined'
 import { Box, Button, Divider, Link, Paper, Stack, Tooltip, Typography } from '@mui/material'
@@ -99,7 +102,7 @@ function MovementHistory({ item, reloadKey }) {
       reloadKey={reloadKey}
       searchable={false}
       emptyTitle="No stock movements yet"
-      emptyMessage="Receipts, issues and adjustments appear here (opening stock arrives with Slice 4.5)."
+      emptyMessage="Opening stock, receipts, issues and adjustments appear here."
       pageSizeOptions={[10, 20, 50]}
     />
   )
@@ -111,8 +114,10 @@ export default function StockItemDetailPage() {
   const [item, setItem] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [dialog, setDialog] = useState(null) // 'edit' | 'active' | 'issue' | 'adjust'
+  const [dialog, setDialog] = useState(null) // 'edit' | 'active' | 'issue' | 'adjust' | 'opening'
   const [historyKey, setHistoryKey] = useState(0)
+  // Whether the item has any movement yet (opening stock is allowed only before the first, A6).
+  const [hasMovements, setHasMovements] = useState(true)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -122,6 +127,12 @@ export default function StockItemDetailPage() {
       .catch(setError)
       .finally(() => setLoading(false))
   }, [itemId])
+
+  useEffect(() => {
+    getStockMovements(itemId, { page: 1, pageSize: 1 })
+      .then((data) => setHasMovements(data.total > 0))
+      .catch(() => setHasMovements(true)) // unsure: hide the action; the server refuses it anyway
+  }, [itemId, historyKey])
 
   useEffect(load, [load])
 
@@ -174,6 +185,11 @@ export default function StockItemDetailPage() {
           {item.low_stock ? <LowStockBadge /> : null}
         </Stack>
         <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          {active && !hasMovements ? (
+            <Button variant="contained" color="secondary" startIcon={<InventoryOutlined />} onClick={() => setDialog('opening')}>
+              Enter opening stock…
+            </Button>
+          ) : null}
           <Tooltip title={active ? '' : 'Activate the item first.'}>
             <span>
               <Button variant="contained" startIcon={<OutboxOutlined />} disabled={!active} onClick={() => setDialog('issue')}>
@@ -237,14 +253,15 @@ export default function StockItemDetailPage() {
         />
       ) : null}
 
-      {dialog === 'issue' || dialog === 'adjust' ? (
+      {dialog === 'issue' || dialog === 'adjust' || dialog === 'opening' ? (
         <StockChangeDialog
           open
           mode={dialog}
           item={item}
           onClose={close}
           onSaved={({ item: saved, movement }) => {
-            const verb = movement.movement_type === 'issue' ? 'Issued' : movement.direction === 'in' ? 'Added' : 'Removed'
+            const verb =
+              movement.movement_type === 'opening' ? 'Opening stock entered:' : movement.movement_type === 'issue' ? 'Issued' : movement.direction === 'in' ? 'Added' : 'Removed'
             notify.success(`${verb} ${movement.quantity} ${unit}. On hand now: ${saved.quantity_on_hand} ${unit}.`)
             setItem(saved)
             setHistoryKey((n) => n + 1)

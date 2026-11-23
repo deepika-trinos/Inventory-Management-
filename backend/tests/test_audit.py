@@ -215,6 +215,7 @@ def test_action_list_has_the_agreed_names():
         "asset.updated",  # Slice 4.2 (edit an asset)
         "asset.retired", "assignment.created", "assignment.returned", "stock.issued",
         "stock.adjusted",
+        "stock.opening",  # Slice 4.5 (opening stock)
         "stock_item.created", "stock_item.updated", "stock_item.activated", "stock_item.deactivated",  # Slice 2.4
  "maintenance.status_changed",
     }

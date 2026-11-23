@@ -57,6 +57,7 @@ class AuditAction:
     STOCK_ITEM_DEACTIVATED = "stock_item.deactivated"  # Slice 2.4
     STOCK_ISSUED = "stock.issued"  # Slice 4.4
     STOCK_ADJUSTED = "stock.adjusted"  # Slice 4.4
+    STOCK_OPENING = "stock.opening"  # Slice 4.5 (opening stock, A6)
 
     # Maintenance
     MAINTENANCE_STATUS_CHANGED = "maintenance.status_changed"  # Slices 6.2-6.3

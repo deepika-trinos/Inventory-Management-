@@ -155,3 +155,38 @@ describe('StockItemDetailPage', () => {
     expect(section('Movement history').getByText('Issue')).toBeTruthy()
   })
 })
+
+// Slice 4.5 (A6): "Enter opening stock…" only while the item is active and has no movements.
+describe('StockItemDetailPage: opening stock', () => {
+  it('is offered for an active item with no movements', async () => {
+    getStockItem.mockResolvedValue({ ...ITEM, quantity_on_hand: 0, low_stock: true })
+    getStockMovements.mockResolvedValue(history([]))
+    renderPage()
+    expect(await screen.findByRole('button', { name: 'Enter opening stock…' })).toBeTruthy()
+  })
+
+  it('is not offered once the item has any movement', async () => {
+    renderPage()
+    await screen.findByRole('heading', { name: 'USB mouse' })
+    await section('Movement history').findByText('Adjustment out')
+    expect(screen.queryByRole('button', { name: 'Enter opening stock…' })).toBeNull()
+  })
+
+  it('is not offered for an inactive item', async () => {
+    getStockItem.mockResolvedValue({ ...ITEM, status: 'inactive', quantity_on_hand: 0, low_stock: false })
+    getStockMovements.mockResolvedValue(history([]))
+    renderPage()
+    await screen.findByRole('heading', { name: 'USB mouse' })
+    await section('Movement history').findByText('No stock movements yet')
+    expect(screen.queryByRole('button', { name: 'Enter opening stock…' })).toBeNull()
+  })
+
+  it('the history shows an opening stock entry as "Opening stock"', async () => {
+    getStockMovements.mockResolvedValue(history([{ ...RECEIPT, id: 20, movement_type: 'opening', reference: null, reason: 'First count' }]))
+    renderPage()
+    await screen.findByRole('heading', { name: 'USB mouse' })
+    const row = await section('Movement history').findByText('Opening stock')
+    expect(row).toBeTruthy()
+    expect(section('Movement history').getByText('First count')).toBeTruthy()
+  })
+})

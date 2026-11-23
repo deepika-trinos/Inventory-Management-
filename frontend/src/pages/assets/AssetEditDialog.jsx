@@ -3,8 +3,11 @@
 //   Shown read-only: asset ID, status, category and the purchase facts (purchase, purchase
 //   date, cost): they come from the invoice and stay locked (P6). Status changes only
 //   through actions such as Retire (AST-07).
+// Slice 4.5 (I4): on an asset ENTERED BY HAND (no purchase) the category (active, one by
+//   one), purchase date (today or earlier) and cost are editable too; on a received asset
+//   they stay locked.
 // The server checks everything again; its problems are shown under the right field.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
@@ -16,17 +19,19 @@ import {
   DialogTitle,
   Divider,
   Grid,
+  MenuItem,
   Typography,
 } from '@mui/material'
 
-import { assetStatusLabel, updateAsset } from '../../api/assets'
+import { assetStatusLabel, enteredByHand, updateAsset } from '../../api/assets'
+import { listCategories } from '../../api/categories'
 import { getErrorCode, getErrorMessage } from '../../api/errors'
 import FormField from '../../components/FormField'
-import { formatPlainDate } from '../../utils/dates'
-import { formatAmount } from '../../utils/money'
+import { formatPlainDate, todayInCompanyTimezone } from '../../utils/dates'
+import { AMOUNT_PATTERN, formatAmount } from '../../utils/money'
 
 // Same limits and checks as the server (backend/app/modules/assets, decisions B57, B61, P5).
-const LIMITS = { name: 200, brand: 100, model: 100, serial_number: 100, location: 200 }
+export const LIMITS = { name: 200, brand: 100, model: 100, serial_number: 100, location: 200 }
 const TEXT_FIELDS = ['name', 'brand', 'model', 'serial_number', 'location']
 const REQUIRED = { name: 'name', model: 'model', serial_number: 'serial number' }
 
@@ -39,6 +44,10 @@ const FIELD_FOR_CODE = {
   invalid_brand: 'brand',
   invalid_location: 'location',
   invalid_warranty_expiry: 'warranty_expiry',
+  purchase_date_in_future: 'purchase_date',
+  category_inactive: 'category_id',
+  category_not_serialized: 'category_id',
+  category_not_found: 'category_id',
 }
 
 export function validateAssetEdit(values, purchaseDate) {
@@ -66,11 +75,37 @@ function ReadOnly({ label, value }) {
   )
 }
 
+/** Purchase date and cost of an asset entered by hand (I1, I4): no future date; INR, 2 decimals, 0 allowed. */
+export function validatePurchaseFacts(values, today = todayInCompanyTimezone()) {
+  const errors = {}
+  if (values.purchase_date && values.purchase_date > today) errors.purchase_date = 'The purchase date cannot be in the future.'
+  const cost = String(values.cost ?? '').trim()
+  if (cost && !AMOUNT_PATTERN.test(cost)) errors.cost = 'Enter an amount of 0 or more, with up to 2 decimals (e.g. 45000.50).'
+  if (!values.category_id) errors.category_id = 'Please choose a category.'
+  return errors
+}
+
 export default function AssetEditDialog({ open, asset, onClose, onSaved }) {
+  const manual = enteredByHand(asset)
+  const today = todayInCompanyTimezone()
   const [values, setValues] = useState(() => ({
     ...Object.fromEntries(TEXT_FIELDS.map((f) => [f, asset[f] ?? ''])),
     warranty_expiry: asset.warranty_expiry ?? '',
+    category_id: asset.category.id,
+    purchase_date: asset.purchase_date ?? '',
+    cost: asset.cost ?? '',
   }))
+  // Manual entries: the categories it can move to (active, one by one) plus its current one.
+  const [categories, setCategories] = useState([asset.category])
+  useEffect(() => {
+    if (!manual) return
+    listCategories({ page: 1, pageSize: 100, sort: 'name', trackingType: 'serialized', status: 'active' })
+      .then((data) => {
+        const others = data.items.filter((c) => c.id !== asset.category.id)
+        setCategories([asset.category, ...others].sort((a, b) => a.name.localeCompare(b.name)))
+      })
+      .catch(() => {})
+  }, [manual, asset.category])
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -83,7 +118,8 @@ export default function AssetEditDialog({ open, asset, onClose, onSaved }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault()
-    const found = validateAssetEdit(values, asset.purchase_date)
+    const purchaseDate = manual ? values.purchase_date || null : asset.purchase_date
+    const found = { ...validateAssetEdit(values, purchaseDate), ...(manual ? validatePurchaseFacts(values, today) : {}) }
     setErrors(found)
     if (Object.keys(found).length) return
 
@@ -91,6 +127,11 @@ export default function AssetEditDialog({ open, asset, onClose, onSaved }) {
     // saves only what really changed (and records nothing if nothing did).
     const payload = Object.fromEntries(TEXT_FIELDS.map((f) => [f, values[f].trim() || null]))
     payload.warranty_expiry = values.warranty_expiry || null
+    if (manual) {
+      payload.category_id = Number(values.category_id)
+      payload.purchase_date = values.purchase_date || null
+      payload.cost = String(values.cost).trim() || null
+    }
     setSaving(true)
     try {
       const saved = await updateAsset(asset.asset_code, payload)
@@ -117,6 +158,7 @@ export default function AssetEditDialog({ open, asset, onClose, onSaved }) {
   )
 
   const purchase = asset.purchase
+  const warrantyMin = manual ? values.purchase_date : asset.purchase_date
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="sm" fullWidth>
@@ -147,10 +189,57 @@ export default function AssetEditDialog({ open, asset, onClose, onSaved }) {
                 onChange={handleChange('warranty_expiry')}
                 error={errors.warranty_expiry}
                 disabled={saving}
-                helperText={asset.purchase_date ? `Not before ${formatPlainDate(asset.purchase_date)}.` : 'Optional.'}
-                slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: asset.purchase_date || undefined } }}
+                helperText={warrantyMin ? `Not before ${formatPlainDate(warrantyMin)}.` : 'Optional.'}
+                slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: warrantyMin || undefined } }}
               />
             </Grid>
+            {manual ? (
+              <>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <FormField
+                    select
+                    label="Category"
+                    required
+                    value={values.category_id}
+                    onChange={handleChange('category_id')}
+                    error={errors.category_id}
+                    disabled={saving}
+                    helperText="Active categories tracked one by one."
+                  >
+                    {categories.map((c) => (
+                      <MenuItem key={c.id} value={c.id}>
+                        {c.name}
+                        {c.status && c.status !== 'active' ? ' (inactive)' : ''}
+                      </MenuItem>
+                    ))}
+                  </FormField>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <FormField
+                    type="date"
+                    label="Purchase date"
+                    value={values.purchase_date}
+                    onChange={handleChange('purchase_date')}
+                    error={errors.purchase_date}
+                    disabled={saving}
+                    helperText="Optional. Today or earlier."
+                    slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: today } }}
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <FormField
+                    label="Cost (₹)"
+                    value={values.cost}
+                    onChange={handleChange('cost')}
+                    error={errors.cost}
+                    disabled={saving}
+                    autoComplete="off"
+                    helperText="Optional. INR, up to 2 decimals."
+                    slotProps={{ htmlInput: { inputMode: 'decimal' } }}
+                  />
+                </Grid>
+              </>
+            ) : null}
           </Grid>
 
           <Divider sx={{ my: 1 }} />
@@ -163,14 +252,21 @@ export default function AssetEditDialog({ open, asset, onClose, onSaved }) {
           >
             <ReadOnly label="Asset ID" value={asset.asset_code} />
             <ReadOnly label="Status" value={assetStatusLabel(asset.status)} />
-            <ReadOnly label="Category" value={asset.category.name} />
-            <ReadOnly label="Purchase" value={purchase ? `${purchase.purchase_number} · ${purchase.vendor}` : null} />
-            <ReadOnly label="Purchase date" value={asset.purchase_date ? formatPlainDate(asset.purchase_date) : null} />
-            <ReadOnly label="Cost" value={asset.cost ? formatAmount(asset.cost) : null} />
+            {manual ? (
+              <ReadOnly label="Purchase" value="None (entered by hand)" />
+            ) : (
+              <>
+                <ReadOnly label="Category" value={asset.category.name} />
+                <ReadOnly label="Purchase" value={`${purchase.purchase_number} · ${purchase.vendor}`} />
+                <ReadOnly label="Purchase date" value={asset.purchase_date ? formatPlainDate(asset.purchase_date) : null} />
+                <ReadOnly label="Cost" value={asset.cost ? formatAmount(asset.cost) : null} />
+              </>
+            )}
           </Box>
           <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 1 }}>
-            Category, purchase, purchase date and cost come from the invoice. Status changes only through
-            actions (for example Retire).
+            {manual
+              ? 'Status changes only through actions (for example Retire).'
+              : 'Category, purchase, purchase date and cost come from the invoice. Status changes only through actions (for example Retire).'}
           </Typography>
         </DialogContent>
         <DialogActions>

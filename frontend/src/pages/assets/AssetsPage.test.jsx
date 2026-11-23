@@ -6,14 +6,16 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes, useParams } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { listAssetLocations, listAssets } from '../../api/assets'
+import { createAsset, listAssetLocations, listAssets } from '../../api/assets'
 import { listCategories } from '../../api/categories'
+import { NotificationProvider } from '../../context/NotificationContext'
 import AssetsPage from './AssetsPage'
 
 vi.mock('../../api/assets', async (importOriginal) => ({
   ...(await importOriginal()),
   listAssets: vi.fn(),
   listAssetLocations: vi.fn(),
+  createAsset: vi.fn(),
 }))
 vi.mock('../../api/categories', async (importOriginal) => ({ ...(await importOriginal()), listCategories: vi.fn() }))
 
@@ -61,12 +63,14 @@ function AssetPageStandIn() {
 
 function renderPage() {
   render(
-    <MemoryRouter initialEntries={['/assets']}>
-      <Routes>
-        <Route path="/assets" element={<AssetsPage />} />
-        <Route path="/assets/:assetId" element={<AssetPageStandIn />} />
-      </Routes>
-    </MemoryRouter>,
+    <NotificationProvider>
+      <MemoryRouter initialEntries={['/assets']}>
+        <Routes>
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/assets/:assetId" element={<AssetPageStandIn />} />
+        </Routes>
+      </MemoryRouter>
+    </NotificationProvider>,
   )
 }
 
@@ -178,5 +182,25 @@ describe('AssetsPage', () => {
 
     fireEvent.keyDown(screen.getByRole('row', { name: 'Open AST-000003' }), { key: 'Enter' })
     expect(await screen.findByText('Asset page AST-000003')).toBeTruthy()
+  })
+})
+
+// Slice 4.5 (A7): "Add existing asset" opens the form; after saving, the new asset's page opens.
+describe('AssetsPage: Add existing asset', () => {
+  it('opens the form and goes to the new asset after saving', async () => {
+    createAsset.mockResolvedValue({ id: 9, asset_code: 'AST-000009' })
+    listCategories.mockResolvedValue(page([LAPTOPS]))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Add existing asset' }))
+    const d = within(await screen.findByRole('dialog', { name: 'Add existing asset' }))
+    fireEvent.mouseDown(await d.findByRole('combobox', { name: /Category/ }))
+    fireEvent.click(await within(screen.getByRole('listbox')).findByRole('option', { name: 'Laptops' }))
+    fireEvent.change(d.getByLabelText(/^Name/), { target: { value: 'Old laptop' } })
+    fireEvent.change(d.getByLabelText(/^Serial number/), { target: { value: 'OLD-1' } })
+    fireEvent.change(d.getByLabelText(/^Model/), { target: { value: 'T480' } })
+    fireEvent.click(d.getByRole('button', { name: 'Add asset' }))
+
+    expect(await screen.findByText('Asset page AST-000009')).toBeTruthy()
+    expect(screen.getByText('AST-000009 added.')).toBeTruthy()
   })
 })

@@ -8,7 +8,7 @@ asset and its history (Slice 4.1); editing the allowed details and retiring
 (Slice 4.2). There is deliberately NO delete endpoint (BR-12).
 """
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -17,6 +17,7 @@ from app.core.pagination import PageParams, page_params
 from app.modules.assets import service
 from app.modules.assets.models import Asset
 from app.modules.assets.schemas import (
+    AssetCreate,
     AssetHistoryPage,
     AssetPage,
     AssetPurchaseSummary,
@@ -60,6 +61,30 @@ def list_assets(
     - Unknown `status` or sort field: **422** `validation_error` / **400** `invalid_sort`
     """
     return service.list_assets(db, params, search=search, category_id=category_id, status=status_filter, location=location)
+
+
+@router.post(
+    "", response_model=AssetRead, status_code=status.HTTP_201_CREATED,
+    summary="Enter an existing asset (no purchase)", responses=error_responses(404, 409, 422),
+)
+def create_asset(
+    body: AssetCreate,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> AssetRead:
+    """Manual entry of equipment the company already owns (Slice 4.5, AST-01, Q4; owner's
+    answer A7). Same asset ID sequence and serial check as receiving; status Available;
+    no purchase link or vendor. Writes audit `asset.created` in the same transaction.
+
+    - Unknown category: **404** `category_not_found`; inactive: **409** `category_inactive`;
+      tracked by quantity: **409** `category_not_serialized`
+    - Serial used by another asset (any case): **409** `serial_number_taken`
+    - Missing serial / model / name, too long: **422** `invalid_*`
+    - Purchase date in the future: **422** `purchase_date_in_future`;
+      warranty before the purchase date: **422** `invalid_warranty_expiry`"""
+    asset = service.create_asset(db, actor=user, data=body.model_dump(), context=context)
+    return _read(asset)
 
 
 @router.get("/locations", response_model=list[str], summary="Locations in use")
@@ -112,10 +137,13 @@ def update_asset(
     db: Session = Depends(get_db),
 ) -> AssetRead:
     """Change the editable details (owner's answer A2): name, brand, model, serial
-    number, location, warranty expiry. Send only what changes; `null` clears brand,
-    location or warranty expiry.
+    number, location, warranty expiry; on assets entered by hand also category,
+    purchase date and cost (Slice 4.5, I4). Send only what changes; `null` clears an
+    optional field.
 
-    - Status, category, purchase date, cost or any other field: **422** `validation_error`
+    - Status or any other field: **422** `validation_error`
+    - Category, purchase date or cost on a received asset: **422** `validation_error`
+      (`details.field`); category not an active one-by-one category: as on entry
     - Retired asset: **409** `asset_retired`
     - Serial number used by another asset (any case): **409** `serial_number_taken`
     - Empty name / model / serial, too long, warranty before the purchase date: **422** `invalid_*`

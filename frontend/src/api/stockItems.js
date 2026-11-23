@@ -59,6 +59,16 @@ export async function adjustStock(id, { direction, quantity, reason, movementDat
   return data
 }
 
+// Opening stock (Slice 4.5, A6): { quantity, note?, movementDate? } -> { item, movement }.
+// Once per item, only while it has no movements (opening_stock_not_allowed).
+export async function enterOpeningStock(id, { quantity, note, movementDate }) {
+  const body = { quantity }
+  if (note) body.note = note
+  if (movementDate) body.movement_date = movementDate
+  const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(id)}/opening-stock`, body)
+  return data
+}
+
 // The item's movement history, newest saved first (G2): { items, total, page, page_size }.
 export async function getStockMovements(id, { page = 1, pageSize = 20 } = {}) {
   const { data } = await apiClient.get(`${BASE}/${encodeURIComponent(id)}/movements`, {

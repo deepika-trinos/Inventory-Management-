@@ -2,16 +2,21 @@
 // Search by asset ID, serial number or name; filter by category, status and location
 // (exact location, any case, chosen from the locations in use); sort and page on the
 // server. Clicking a row (or Enter / Space on it) opens the asset page /assets/:assetId (D7).
-// Reading only: editing and retiring are Slice 4.2; manual entry is Slice 4.5.
+// Editing and retiring are on the asset page (Slice 4.2). Slice 4.5 (AST-01, A7): an
+// "Add existing asset" button enters equipment the company already owns, without a
+// purchase; after saving, the new asset's page opens.
 // The employee filter arrives with assignments in Slice 5.1 (owner's answer to A1).
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
+import AddOutlined from '@mui/icons-material/AddOutlined'
 import { Button, MenuItem, Stack, TextField, Typography } from '@mui/material'
 
 import { ASSET_STATUS_LABELS, assetPath, assetStatusLabel, listAssetLocations, listAssets } from '../../api/assets'
 import { listCategories } from '../../api/categories'
 import DataTable from '../../components/DataTable'
 import StatusBadge from '../../components/StatusBadge'
+import { useNotify } from '../../context/NotificationContext'
+import AssetCreateDialog from './AssetCreateDialog'
 
 const dash = (
   <Typography variant="body2" color="text.secondary" component="span">
@@ -31,6 +36,8 @@ const COLUMNS = [
 
 export default function AssetsPage() {
   const navigate = useNavigate()
+  const notify = useNotify()
+  const [adding, setAdding] = useState(false)
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -120,9 +127,14 @@ export default function AssetsPage() {
 
   return (
     <Stack spacing={2}>
-      <Typography variant="h5" component="h1">
-        Assets
-      </Typography>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+        <Typography variant="h5" component="h1">
+          Assets
+        </Typography>
+        <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setAdding(true)}>
+          Add existing asset
+        </Button>
+      </Stack>
 
       <DataTable
         columns={COLUMNS}
@@ -130,13 +142,24 @@ export default function AssetsPage() {
         defaultSort="-asset_code"
         searchPlaceholder="Search asset ID, serial number or name"
         emptyTitle="No assets yet"
-        emptyMessage="Assets are created when a purchase with one-by-one items is received."
+        emptyMessage="Assets are created when a purchase with one-by-one items is received, or with Add existing asset for equipment you already own."
         toolbar={filters}
         filtersActive={filtersActive}
         onClearFilters={clearFilters}
         onRowClick={(a) => navigate(assetPath(a))}
         rowLabel={(a) => `Open ${a.asset_code}`}
       />
+
+      {adding ? (
+        <AssetCreateDialog
+          open
+          onClose={() => setAdding(false)}
+          onSaved={(saved) => {
+            notify.success(`${saved.asset_code} added.`)
+            navigate(assetPath(saved))
+          }}
+        />
+      ) : null}
     </Stack>
   )
 }

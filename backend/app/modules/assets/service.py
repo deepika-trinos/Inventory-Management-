@@ -14,10 +14,16 @@ RULES (AST-01, AST-02, AST-06, BR-01, P5)
 
 EDITING AND RETIRING (Slice 4.2, AST-04, AST-07, BR-13; owner's answers A2, A3)
 - Editable: name, brand, model, serial number (still unique), location, warranty
-  expiry (still not before the purchase date, B61). Category, purchase link,
-  purchase date and cost are locked (they come from the invoice; manual-entry
-  editing arrives with Slice 4.5, F1). Asset ID and status are never edited:
-  status changes only through actions (AST-07).
+  expiry (still not before the purchase date, B61). Category, purchase date and
+  cost are locked on RECEIVED assets (they come from the invoice) and editable on
+  assets ENTERED BY HAND (Slice 4.5, I4). Asset ID, status and the purchase link are
+  never edited: status changes only through actions (AST-07).
+
+MANUAL ENTRY (Slice 4.5, AST-01, Q4; owner's answer A7)
+- An active one-by-one category, serial number (unique), model and name required;
+  brand, location, warranty, purchase date (not in the future) and cost optional; no
+  purchase link or vendor; always Available. Same asset ID sequence and serial
+  check as receiving. Audit asset.created in the same transaction.
 - Retire only from Available or Damaged, with a required reason (free text, up
   to 500 characters). Retiring cannot be undone; a retired asset is read-only.
 - Every change writes its audit row in the same transaction (asset.updated with
@@ -262,8 +268,65 @@ def serials_in_use(db: Session, serials: Iterable[str]) -> set[str]:
     return set(found)
 
 
+# ---- Manual entry (Slice 4.5) ------------------------------------------------------------
+def _company_today() -> date:
+    """Today in the company timezone (Q11), as for purchase dates (B48)."""
+    from app.modules.inventory.service import _today
+
+    return _today()
+
+
+def _manual_purchase_date(value: date | None) -> date | None:
+    if value is not None and value > _company_today():
+        raise AppError(422, "purchase_date_in_future", "The purchase date cannot be in the future.")
+    return value
+
+
+def _manual_category(db: Session, category_id: int) -> AssetCategory:
+    """An ACTIVE category tracked ONE BY ONE (B13, PRD 9.2): 404 / 409 otherwise."""
+    from app.modules.categories.models import TrackingType
+
+    category = categories_service.get_category(db, category_id)  # 404 category_not_found
+    if category.tracking_type != TrackingType.SERIALIZED:
+        raise AppError(
+            409, "category_not_serialized",
+            f'Category "{category.name}" is tracked by quantity. Enter its stock as opening stock on the Inventory page instead.',
+        )
+    return categories_service.ensure_category_selectable(db, category_id)  # 409 category_inactive
+
+
+def create_asset(db: Session, *, actor: User, data: dict[str, Any], context: AuditContext | None = None) -> Asset:
+    """Enter an asset the company already owns (A7). One transaction with asset.created;
+    a failure saves nothing."""
+    try:
+        category = _manual_category(db, data["category_id"])
+        purchase_date = _manual_purchase_date(data.get("purchase_date"))
+        unit = clean_unit(data, purchase_date=purchase_date)  # serial, model, name, brand, location, warranty (P5, B61)
+        if serials_in_use(db, [unit["serial_number"]]):
+            raise serial_taken_error(unit["serial_number"])
+        asset = Asset(
+            **unit,
+            category_id=category.id,
+            purchase_line_id=None,
+            purchase_date=purchase_date,
+            cost=data.get("cost"),
+            status=AssetStatus.AVAILABLE,
+            created_by_user_id=actor.id,
+        )
+        db.add(asset)
+        db.flush()
+        audit.record(db, actor=actor, action=AuditAction.ASSET_CREATED, entity=asset, after=snapshot(asset), context=context)
+    except Exception:
+        db.rollback()
+        raise
+    _commit(db)
+    db.refresh(asset)
+    return asset
+
+
 # ---- Editing and retiring (Slice 4.2) ----------------------------------------------------
 EDITABLE_FIELDS = ("name", "brand", "model", "serial_number", "location", "warranty_expiry")
+MANUAL_ONLY_FIELDS = ("category_id", "purchase_date", "cost")  # Slice 4.5, I4
 RETIRABLE_STATUSES = (AssetStatus.AVAILABLE, AssetStatus.DAMAGED)  # A3
 
 _STATUS_LABELS = {
@@ -320,15 +383,24 @@ _EDIT_TEXT_RULES = {
 }
 
 
-def _clean_edit(field: str, value: Any, asset: Asset) -> Any:
-    """Check and tidy one edited value (the same rules as when the asset was created)."""
-    if field == "warranty_expiry":
-        if value is not None and asset.purchase_date is not None and value < asset.purchase_date:
+def _clean_edit(db: Session, field: str, value: Any, asset: Asset) -> Any:
+    """Check and tidy one edited value (the same rules as when the asset was created).
+    The warranty / purchase date rule (B61) is checked on the final values afterwards."""
+    if field in MANUAL_ONLY_FIELDS:
+        if asset.purchase_line_id is not None:
             raise AppError(
-                422,
-                "invalid_warranty_expiry",
-                f"The warranty expiry cannot be before the purchase date ({asset.purchase_date.isoformat()}).",
+                422, "validation_error",
+                "Category, purchase date and cost come from the purchase and cannot be changed on a received asset.",
+                {"field": field},
             )
+        if field == "category_id":
+            if value is None:
+                raise AppError(422, "validation_error", "Please choose a category.", {"field": field})
+            return value if value == asset.category_id else _manual_category(db, value).id
+        if field == "purchase_date":
+            return _manual_purchase_date(value)
+        return value  # cost: format already checked (AssetCost)
+    if field == "warranty_expiry":
         return value
     required, max_length, code, label = _EDIT_TEXT_RULES[field]
     return _text(value, required=required, max_length=max_length, code=code, label=label)
@@ -353,9 +425,17 @@ def update_asset(
         _ensure_not_retired(asset)
         new_values: dict[str, Any] = {}
         for field, value in changes.items():
-            cleaned = _clean_edit(field, value, asset)
+            cleaned = _clean_edit(db, field, value, asset)
             if cleaned != getattr(asset, field):
                 new_values[field] = cleaned
+        final_warranty = new_values.get("warranty_expiry", asset.warranty_expiry)
+        final_purchase = new_values.get("purchase_date", asset.purchase_date)
+        if ("warranty_expiry" in new_values or "purchase_date" in new_values) and final_warranty and final_purchase \
+                and final_warranty < final_purchase:
+            raise AppError(
+                422, "invalid_warranty_expiry",
+                f"The warranty expiry cannot be before the purchase date ({final_purchase.isoformat()}).",
+            )
         serial = new_values.get("serial_number")
         if serial is not None and serial.lower() != asset.serial_number.lower():
             clash = db.scalar(
@@ -371,12 +451,16 @@ def update_asset(
         return asset
 
     before = {field: getattr(asset, field) for field in new_values}
+    after = dict(new_values)
+    if "category_id" in new_values:  # names too, so the history reads "Laptops -> Desktops" (I4)
+        before["category"] = asset.category.name
+        after["category"] = db.get(AssetCategory, new_values["category_id"]).name
     for field, value in new_values.items():
         setattr(asset, field, value)
     try:
         audit.record(
             db, actor=actor, action=AuditAction.ASSET_UPDATED, entity=asset,
-            before=before, after=dict(new_values), context=context,
+            before=before, after=after, context=context,
         )
     except Exception:
         db.rollback()

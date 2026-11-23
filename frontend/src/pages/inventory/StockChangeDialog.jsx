@@ -2,7 +2,9 @@
 // A5, A4-5a/b), opened from the stock item page as two separate actions:
 //   mode="issue"  : quantity, required reason, optional ACTIVE employee who received it
 //   mode="adjust" : Add or Remove, quantity, required reason
-// Both: date (today by default; earlier allowed; never in the future). After the form,
+//   mode="opening": quantity, optional note (Slice 4.5, INV-01; owner's answer A6): once
+//                   per item, only while it has no movements; the history shows "Opening stock"
+// All: date (today by default; earlier allowed; never in the future). After the form,
 // a confirm box shows the balance now and after the change (no approval step, Q7).
 // Stock never goes below 0: the screen checks first and the server refuses it again
 // (insufficient_stock). Server problems are shown under the field they belong to.
@@ -22,7 +24,7 @@ import {
 
 import { employeeLabel } from '../../api/employees'
 import { getErrorCode, getErrorMessage } from '../../api/errors'
-import { adjustStock, issueStock, unitLabel } from '../../api/stockItems'
+import { adjustStock, enterOpeningStock, issueStock, unitLabel } from '../../api/stockItems'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import EmployeePicker from '../../components/EmployeePicker'
 import FormField from '../../components/FormField'
@@ -40,6 +42,8 @@ const FIELD_FOR_CODE = {
   employee_not_found: 'employee',
 }
 
+const OPENING_HINT = 'Opening stock can be entered once, before any other movement. Later corrections are made with Adjust.'
+
 /** The change in stock: negative for an issue or a removal. */
 export function stockChange(mode, direction, quantity) {
   return mode === 'issue' || direction === 'remove' ? -quantity : quantity
@@ -55,7 +59,7 @@ export function validateStockChange({ mode, direction, quantity, reason, movemen
   }
   if (mode === 'adjust' && !direction) errors.direction = 'Choose Add or Remove.'
   const text = reason.trim()
-  if (!text) errors.reason = 'Please enter the reason.'
+  if (!text && mode !== 'opening') errors.reason = 'Please enter the reason.'
   else if (text.length > REASON_MAX) errors.reason = `Use at most ${REASON_MAX} characters.`
   if (!movementDate) errors.movementDate = 'Please enter the date.'
   else if (movementDate > today) errors.movementDate = 'The date cannot be in the future.'
@@ -64,9 +68,10 @@ export function validateStockChange({ mode, direction, quantity, reason, movemen
 
 export default function StockChangeDialog({ open, mode, item, onClose, onSaved }) {
   const issue = mode === 'issue'
+  const opening = mode === 'opening'
   const unit = unitLabel(item.unit_of_measure).toLowerCase()
   const today = todayInCompanyTimezone()
-  const [values, setValues] = useState({ direction: issue ? 'remove' : '', quantity: '', reason: '', movementDate: today })
+  const [values, setValues] = useState({ direction: issue ? 'remove' : opening ? 'add' : '', quantity: '', reason: '', movementDate: today })
   const [employee, setEmployee] = useState(null)
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState('')
@@ -92,9 +97,10 @@ export default function StockChangeDialog({ open, mode, item, onClose, onSaved }
   const save = async () => {
     const common = { quantity, reason: values.reason.trim(), movementDate: values.movementDate }
     try {
-      const result = issue
-        ? await issueStock(item.id, { ...common, employeeId: employee?.id })
-        : await adjustStock(item.id, { ...common, direction: values.direction })
+      let result
+      if (issue) result = await issueStock(item.id, { ...common, employeeId: employee?.id })
+      else if (opening) result = await enterOpeningStock(item.id, { quantity, note: common.reason, movementDate: values.movementDate })
+      else result = await adjustStock(item.id, { ...common, direction: values.direction })
       onSaved(result)
     } catch (error) {
       setConfirming(false)
@@ -104,14 +110,21 @@ export default function StockChangeDialog({ open, mode, item, onClose, onSaved }
     }
   }
 
-  const title = issue ? `Issue ${item.name}` : `Adjust ${item.name}`
-  const verb = issue ? 'Issue' : values.direction === 'add' ? 'Add' : 'Remove'
-  const confirmTitle = `${verb} ${quantity} ${unit}${issue ? ' of' : values.direction === 'add' ? ' to' : ' from'} ${item.name}?`
+  const title = issue ? `Issue ${item.name}` : opening ? `Opening stock: ${item.name}` : `Adjust ${item.name}`
+  const verb = issue ? 'Issue' : opening ? 'Enter' : values.direction === 'add' ? 'Add' : 'Remove'
+  const confirmTitle = opening
+    ? `Enter opening stock of ${quantity} ${unit} for ${item.name}?`
+    : `${verb} ${quantity} ${unit}${issue ? ' of' : values.direction === 'add' ? ' to' : ' from'} ${item.name}?`
+  const note = values.reason.trim()
   const details = [
-    `On hand now: ${item.quantity_on_hand} ${unit} · after: ${after} ${unit}.`,
+    opening
+      ? `On hand: ${item.quantity_on_hand} → ${after} ${unit}.`
+      : `On hand now: ${item.quantity_on_hand} ${unit} · after: ${after} ${unit}.`,
     issue && employee ? `Issued to ${employeeLabel(employee)}.` : null,
-    `Date: ${formatPlainDate(values.movementDate)}. Reason: ${values.reason.trim()}`,
-    'Stock movements are permanent: a mistake is corrected with a new adjustment.',
+    opening
+      ? `Date: ${formatPlainDate(values.movementDate)}.${note ? ` Note: ${note}` : ''}`
+      : `Date: ${formatPlainDate(values.movementDate)}. Reason: ${note}`,
+    opening ? OPENING_HINT : 'Stock movements are permanent: a mistake is corrected with a new adjustment.',
   ].filter(Boolean)
 
   return (
@@ -129,7 +142,12 @@ export default function StockChangeDialog({ open, mode, item, onClose, onSaved }
               On hand now: {item.quantity_on_hand} {unit}
               {values.quantity && !errors.quantity && quantity > 0 ? ` · after: ${after} ${unit}` : ''}
             </Typography>
-            {!issue ? (
+            {opening ? (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                The count already on the shelf when you start using the system. {OPENING_HINT}
+              </Typography>
+            ) : null}
+            {!issue && !opening ? (
               <>
                 <RadioGroup row aria-label="Add or remove" value={values.direction} onChange={set('direction')}>
                   <FormControlLabel value="add" control={<Radio />} label="Add (found, counted more)" />
@@ -167,15 +185,15 @@ export default function StockChangeDialog({ open, mode, item, onClose, onSaved }
               />
             ) : null}
             <FormField
-              label="Reason"
-              required
+              label={opening ? 'Note (optional)' : 'Reason'}
+              required={!opening}
               multiline
               minRows={2}
               value={values.reason}
               onChange={set('reason')}
               error={errors.reason}
               helperText={`${values.reason.trim().length} / ${REASON_MAX}`}
-              placeholder={issue ? 'e.g. New joiner kit for Asha Kumar' : 'e.g. Three broken, scrapped'}
+              placeholder={issue ? 'e.g. New joiner kit for Asha Kumar' : opening ? 'e.g. Counted in the store room' : 'e.g. Three broken, scrapped'}
             />
             <FormField
               label="Date"
@@ -191,7 +209,7 @@ export default function StockChangeDialog({ open, mode, item, onClose, onSaved }
           <DialogActions>
             <Button onClick={onClose}>Cancel</Button>
             <Button type="submit" variant="contained">
-              {issue ? 'Issue…' : 'Adjust…'}
+              {issue ? 'Issue…' : opening ? 'Continue…' : 'Adjust…'}
             </Button>
           </DialogActions>
         </form>
@@ -200,7 +218,7 @@ export default function StockChangeDialog({ open, mode, item, onClose, onSaved }
       <ConfirmDialog
         open={open && confirming}
         title={confirmTitle}
-        confirmLabel={issue ? 'Issue' : verb}
+        confirmLabel={issue ? 'Issue' : opening ? 'Enter opening stock' : verb}
         cancelLabel="Go back"
         destructive={change < 0}
         onCancel={() => setConfirming(false)}

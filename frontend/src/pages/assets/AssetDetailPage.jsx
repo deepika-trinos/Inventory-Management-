@@ -9,12 +9,14 @@
 // and a Retire… button (only Available or Damaged, required reason, cannot be undone,
 // A3). A retired asset shows who retired it, when and why, and has no Edit or Retire.
 // History lists each edit (old -> new value) and the retirement with its reason.
+// Slice 4.5: an asset entered by hand shows "Entered by hand" next to its status and in
+// its Purchase section (with its purchase date and cost, if typed).
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
-import { Box, Button, Divider, Link, Paper, Stack, Tooltip, Typography } from '@mui/material'
+import { Box, Button, Chip, Divider, Link, Paper, Stack, Tooltip, Typography } from '@mui/material'
 
 import { assetStatusLabel, getAsset, getAssetHistory, historyActionLabel, RETIRABLE_STATUSES } from '../../api/assets'
 import { getErrorCode } from '../../api/errors'
@@ -64,11 +66,16 @@ const FIELD_LABELS = {
   serial_number: 'Serial number',
   location: 'Location',
   warranty_expiry: 'Warranty expiry',
+  category: 'Category',
+  purchase_date: 'Purchase date',
+  cost: 'Cost',
 }
 
 function shownValue(field, value) {
   if (value === null || value === undefined || value === '') return '(empty)'
-  return field === 'warranty_expiry' ? formatPlainDate(value) : value
+  if (field === 'warranty_expiry' || field === 'purchase_date') return formatPlainDate(value)
+  if (field === 'cost') return formatAmount(value)
+  return value
 }
 
 // A short note under each history entry, from what the audit log recorded.
@@ -80,7 +87,9 @@ export function historyNote(entry) {
   }
   if (entry.action === 'asset.updated') {
     // e.g. "Location: Bangalore Floor 2 → Chennai; Serial number: DL-1O01 → DL-1001"
+    // category_id is shown by name (the "category" entry), not by number.
     return Object.keys(after)
+      .filter((field) => field !== 'category_id')
       .map((field) => `${FIELD_LABELS[field] ?? field}: ${shownValue(field, before[field])} → ${shownValue(field, after[field])}`)
       .join('; ')
   }
@@ -179,6 +188,7 @@ export default function AssetDetailPage() {
             Asset {a.asset_code}
           </Typography>
           <StatusBadge status={assetStatusLabel(a.status)} />
+          {purchase ? null : <Chip size="small" variant="outlined" label="Entered by hand" data-testid="asset-origin" />}
         </Stack>
         {retired ? (
           <Typography variant="body2" color="text.secondary">
@@ -247,7 +257,15 @@ export default function AssetDetailPage() {
             <Detail label="Cost" value={a.cost ? formatAmount(a.cost) : null} />
           </Box>
         ) : (
-          <EmptyState title="No purchase" message="This asset was entered by hand, not received on a purchase." />
+          <Box sx={grid}>
+            <Detail
+              label="Origin"
+              testId="asset-purchase"
+              value="Entered by hand (existing equipment, no purchase or vendor)"
+            />
+            <Detail label="Purchase date" value={a.purchase_date ? formatPlainDate(a.purchase_date) : null} />
+            <Detail label="Cost" value={a.cost ? formatAmount(a.cost) : null} />
+          </Box>
         )}
       </Section>
 

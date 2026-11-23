@@ -1,6 +1,7 @@
 // Calls to the asset endpoints (/api/v1/assets). Admin and IT Manager only.
 // Slice 3.2: get one asset. Slice 4.1: the asset register (list, search, filters),
 // the locations in use, and an asset's history. Slice 4.2: edit and retire.
+// Slice 4.5: enter an existing asset by hand (no purchase).
 import apiClient from './client'
 
 const BASE = '/api/v1/assets'
@@ -47,11 +48,25 @@ export async function getAsset(ref) {
   return data
 }
 
+// Enter equipment the company already owns, without a purchase (Slice 4.5, A7).
+// fields: { category_id, serial_number, model, name, brand?, location?, warranty_expiry?,
+// purchase_date?, cost? } -> the new asset (status Available, no purchase).
+export async function createAsset(fields) {
+  const { data } = await apiClient.post(BASE, fields)
+  return data
+}
+
+/** True for an asset entered by hand (no purchase). */
+export function enteredByHand(asset) {
+  return !asset.purchase
+}
+
 // Statuses an asset can be retired from (owner's answer A3).
 export const RETIRABLE_STATUSES = ['available', 'damaged']
 
 // Edit the allowed details (A2). changes: any of { name, brand, model, serial_number,
-// location, warranty_expiry }; null clears brand, location or warranty_expiry.
+// location, warranty_expiry }; for assets entered by hand also category_id,
+// purchase_date and cost (Slice 4.5). null clears an optional field.
 export async function updateAsset(ref, changes) {
   const { data } = await apiClient.patch(`${BASE}/${encodeURIComponent(ref)}`, changes)
   return data

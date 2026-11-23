@@ -103,8 +103,9 @@ describe('AssetDetailPage', () => {
     renderPage()
     await screen.findByRole('heading', { name: 'Asset AST-000001' })
 
-    expect(section('Purchase').getByText('No purchase')).toBeTruthy()
+    expect(section('Purchase').getByText('Entered by hand (existing equipment, no purchase or vendor)')).toBeTruthy()
     expect(section('Purchase').queryByRole('link')).toBeNull()
+    expect(screen.getByTestId('asset-origin').textContent).toBe('Entered by hand')
   })
 
   it('shows the history: when, what, by whom and details', async () => {

@@ -7,7 +7,7 @@ retiring. Manual entry comes in Slice 4.5.
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -77,12 +77,17 @@ class AssetRead(BaseModel):
     retire_reason: str | None = Field(default=None, description="Why it was retired (required when retiring).")
 
 
+# INR, 2 decimals, 0 allowed, NUMERIC(12,2): the same format as a purchase line's unit cost (P2, B44).
+AssetCost = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2, description="INR, 2 decimals, 0 allowed.")]
+
+
 class AssetUpdate(BaseModel):
-    """Edit an asset (Slice 4.2, owner's answer A2). Send only the fields to change;
-    `null` clears brand, location or warranty expiry. Any other field (status,
-    category, purchase date, cost, asset ID, ...) is refused with 422
-    `validation_error`: status changes only through actions (AST-07) and the purchase
-    facts of a received asset are locked."""
+    """Edit an asset (Slice 4.2, owner's answer A2; Slice 4.5 for manual entries). Send only
+    the fields to change; `null` clears brand, location, warranty expiry, and (manual
+    entries) purchase date and cost. Category, purchase date and cost can be changed
+    only on assets entered by hand (I4); on a received asset they are refused with 422
+    `validation_error`. Any other field (status, asset ID, ...) is refused the same way:
+    status changes only through actions (AST-07)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -92,6 +97,28 @@ class AssetUpdate(BaseModel):
     serial_number: str | None = Field(default=None, max_length=1000)
     location: str | None = Field(default=None, max_length=1000)
     warranty_expiry: date | None = None
+    # Manual entries only (Slice 4.5, I4):
+    category_id: int | None = Field(default=None, ge=1)
+    purchase_date: date | None = None
+    cost: AssetCost | None = None
+
+
+class AssetCreate(BaseModel):
+    """Enter equipment the company already owns, without a purchase (Slice 4.5, AST-01,
+    Q4; owner's answer A7). The asset ID is made by the system; status is always
+    Available; there is no purchase link or vendor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: int = Field(ge=1, description="An active one-by-one category.")
+    serial_number: str | None = Field(default=None, max_length=1000, description="Required; unique ignoring case.")
+    model: str | None = Field(default=None, max_length=1000, description="Required.")
+    name: str | None = Field(default=None, max_length=1000, description="Required (no purchase line to name it after).")
+    brand: str | None = Field(default=None, max_length=1000)
+    location: str | None = Field(default=None, max_length=1000)
+    warranty_expiry: date | None = Field(default=None, description="Not before the purchase date (B61).")
+    purchase_date: date | None = Field(default=None, description="Optional; not in the future.")
+    cost: AssetCost | None = Field(default=None, description="Optional; INR, 2 decimals, 0 allowed.")
 
 
 class AssetRetire(BaseModel):
