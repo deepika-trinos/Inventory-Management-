@@ -127,4 +127,31 @@ describe('StockItemDetailPage', () => {
     expect(signedQuantity({ direction: 'in', quantity: 4 }, 'boxes')).toBe('+4 boxes')
     expect(signedQuantity({ direction: 'out', quantity: 1 }, 'pieces')).toBe('−1 pieces')
   })
+
+  // ---- Slice 4.4 ------------------------------------------------------------------------
+  it('an active item shows Issue… and Adjust…', async () => {
+    renderPage()
+    await screen.findByRole('heading', { name: 'USB mouse' })
+    expect(screen.getByRole('button', { name: 'Issue…' }).disabled).toBe(false)
+    expect(screen.getByRole('button', { name: 'Adjust…' }).disabled).toBe(false)
+  })
+
+  it('an inactive item cannot be issued or adjusted', async () => {
+    getStockItem.mockResolvedValue({ ...ITEM, status: 'inactive', quantity_on_hand: 0, low_stock: false })
+    renderPage()
+    await screen.findByRole('heading', { name: 'USB mouse' })
+    expect(screen.getByRole('button', { name: 'Issue…' }).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Adjust…' }).disabled).toBe(true)
+  })
+
+  it('an issue to an employee shows who received it in the history', async () => {
+    getStockMovements.mockResolvedValue(history([{
+      ...ADJUST, id: 13, movement_type: 'issue', reason: 'Replacement mouse',
+      issued_to: { id: 3, employee_code: 'EMP-001', full_name: 'Asha Kumar' },
+    }]))
+    renderPage()
+    await screen.findByRole('heading', { name: 'USB mouse' })
+    expect(await section('Movement history').findByText('Issued to Asha Kumar (EMP-001)')).toBeTruthy()
+    expect(section('Movement history').getByText('Issue')).toBeTruthy()
+  })
 })

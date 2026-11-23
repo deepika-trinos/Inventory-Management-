@@ -1,7 +1,8 @@
-// Pick an employee to link to a login (Users screen, Slice 2.2, closes B12).
-// Lists only ACTIVE employees WITHOUT a login, searched on the server by
-// employee ID, name or department as you type. The employee already linked to
-// this user (when editing) is always offered too.
+// Pick an employee: to link to a login (Users screen, Slice 2.2, closes B12), or to
+// receive issued stock (Slice 4.4, A4: onlyWithoutLogin={false}).
+// Lists only ACTIVE employees (by default only those WITHOUT a login), searched on the
+// server by employee ID, name or department as you type. The employee already linked
+// to this user (when editing) is always offered too.
 //
 //   <EmployeePicker value={employee} onChange={setEmployee} required error={errors.employee} />
 import { useEffect, useState } from 'react'
@@ -21,6 +22,7 @@ export default function EmployeePicker({
   error = '',
   helperText = '',
   disabled = false,
+  onlyWithoutLogin = true, // false: every active employee (stock issues, A4)
 }) {
   const [input, setInput] = useState('')
   const [options, setOptions] = useState([])
@@ -34,7 +36,7 @@ export default function EmployeePicker({
       setLoadError('')
       // While an option is shown in the box, its label is the input: search everything instead.
       const search = value && input === employeeLabel(value) ? '' : input.trim()
-      listEmployees({ status: 'active', hasLogin: false, search, pageSize: 20, sort: 'full_name' })
+      listEmployees({ status: 'active', hasLogin: onlyWithoutLogin ? false : undefined, search, pageSize: 20, sort: 'full_name' })
         .then((data) => {
           if (cancelled) return
           const found = data.items
@@ -48,7 +50,7 @@ export default function EmployeePicker({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [input, value, current])
+  }, [input, value, current, onlyWithoutLogin])
 
   return (
     <Autocomplete

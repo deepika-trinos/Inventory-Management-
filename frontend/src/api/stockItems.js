@@ -40,6 +40,25 @@ export async function getStockItem(id) {
   return data
 }
 
+// Issue stock (Slice 4.4, A4): { quantity, reason, employeeId?, movementDate? }
+// -> { item, movement }. Never below 0 (insufficient_stock).
+export async function issueStock(id, { quantity, reason, employeeId, movementDate }) {
+  const body = { quantity, reason }
+  if (employeeId) body.employee_id = employeeId
+  if (movementDate) body.movement_date = movementDate
+  const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(id)}/issue`, body)
+  return data
+}
+
+// Adjust stock (Slice 4.4, A5): { direction: 'add' | 'remove', quantity, reason, movementDate? }
+// -> { item, movement }.
+export async function adjustStock(id, { direction, quantity, reason, movementDate }) {
+  const body = { direction, quantity, reason }
+  if (movementDate) body.movement_date = movementDate
+  const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(id)}/adjust`, body)
+  return data
+}
+
 // The item's movement history, newest saved first (G2): { items, total, page, page_size }.
 export async function getStockMovements(id, { page = 1, pageSize = 20 } = {}) {
   const { data } = await apiClient.get(`${BASE}/${encodeURIComponent(id)}/movements`, {

@@ -4,15 +4,19 @@
 // history: every receipt (and from Slice 4.4/4.5 every issue, adjustment and opening
 // stock), newest saved first (G2), with type, change, balance after, business date,
 // who saved it and when, the reason, and what caused it (a receipt links to its purchase).
-// The existing Edit and Activate / Deactivate actions reuse the Inventory page's boxes;
-// there is no new way to change stock here.
+// The existing Edit and Activate / Deactivate actions reuse the Inventory page's boxes.
+// Slice 4.4 (INV-04; A4, A5, A4-5b): "Issue…" and "Adjust…" open StockChangeDialog (form,
+// then a confirm box with the balance now and after); the page and history update after.
+// Inactive items cannot be issued or adjusted (B38), so both are greyed out for them.
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
-import { Box, Button, Divider, Link, Paper, Stack, Typography } from '@mui/material'
+import OutboxOutlined from '@mui/icons-material/OutboxOutlined'
+import TuneOutlined from '@mui/icons-material/TuneOutlined'
+import { Box, Button, Divider, Link, Paper, Stack, Tooltip, Typography } from '@mui/material'
 
 import { getErrorCode, getErrorMessage } from '../../api/errors'
 import { movementTypeLabel } from '../../api/purchases'
@@ -26,6 +30,7 @@ import StatusBadge, { recordStatusLabel } from '../../components/StatusBadge'
 import { useNotify } from '../../context/NotificationContext'
 import { formatDateTime, formatPlainDate } from '../../utils/dates'
 import LowStockBadge from './LowStockBadge'
+import StockChangeDialog from './StockChangeDialog'
 import StockItemFormDialog from './StockItemFormDialog'
 
 function Detail({ label, value, testId }) {
@@ -69,6 +74,7 @@ function referenceCell(m) {
       </Link>
     )
   }
+  if (m.issued_to) return `Issued to ${m.issued_to.full_name} (${m.issued_to.employee_code})`
   return '—'
 }
 
@@ -93,7 +99,7 @@ function MovementHistory({ item, reloadKey }) {
       reloadKey={reloadKey}
       searchable={false}
       emptyTitle="No stock movements yet"
-      emptyMessage="Stock received on purchases appears here (and, later, issues, adjustments and opening stock)."
+      emptyMessage="Receipts, issues and adjustments appear here (opening stock arrives with Slice 4.5)."
       pageSizeOptions={[10, 20, 50]}
     />
   )
@@ -105,7 +111,7 @@ export default function StockItemDetailPage() {
   const [item, setItem] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [dialog, setDialog] = useState(null) // 'edit' | 'active'
+  const [dialog, setDialog] = useState(null) // 'edit' | 'active' | 'issue' | 'adjust'
   const [historyKey, setHistoryKey] = useState(0)
 
   const load = useCallback(() => {
@@ -168,6 +174,20 @@ export default function StockItemDetailPage() {
           {item.low_stock ? <LowStockBadge /> : null}
         </Stack>
         <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <Tooltip title={active ? '' : 'Activate the item first.'}>
+            <span>
+              <Button variant="contained" startIcon={<OutboxOutlined />} disabled={!active} onClick={() => setDialog('issue')}>
+                Issue…
+              </Button>
+            </span>
+          </Tooltip>
+          <Tooltip title={active ? '' : 'Activate the item first.'}>
+            <span>
+              <Button variant="outlined" startIcon={<TuneOutlined />} disabled={!active} onClick={() => setDialog('adjust')}>
+                Adjust…
+              </Button>
+            </span>
+          </Tooltip>
           <Button variant="outlined" startIcon={<EditOutlined />} onClick={() => setDialog('edit')}>
             Edit
           </Button>
@@ -210,6 +230,22 @@ export default function StockItemDetailPage() {
           onClose={close}
           onSaved={(saved) => {
             notify.success(`${saved.name} saved.`)
+            setItem(saved)
+            setHistoryKey((n) => n + 1)
+            close()
+          }}
+        />
+      ) : null}
+
+      {dialog === 'issue' || dialog === 'adjust' ? (
+        <StockChangeDialog
+          open
+          mode={dialog}
+          item={item}
+          onClose={close}
+          onSaved={({ item: saved, movement }) => {
+            const verb = movement.movement_type === 'issue' ? 'Issued' : movement.direction === 'in' ? 'Added' : 'Removed'
+            notify.success(`${verb} ${movement.quantity} ${unit}. On hand now: ${saved.quantity_on_hand} ${unit}.`)
             setItem(saved)
             setHistoryKey((n) => n + 1)
             close()

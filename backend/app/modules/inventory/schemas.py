@@ -62,6 +62,16 @@ class MovementUser(BaseModel):
     email: str
 
 
+class MovementEmployee(BaseModel):
+    """The employee an issue went to (Slice 4.4, A4)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    employee_code: str
+    full_name: str
+
+
 class MovementReference(BaseModel):
     """What caused the movement. Receipts: their purchase (C3). Later slices add others."""
 
@@ -82,8 +92,36 @@ class StockMovementRead(BaseModel):
     movement_date: date = Field(description="The business date, e.g. the received date (C2).")
     created_at: datetime = Field(description="When it was saved (UTC).")
     created_by: MovementUser
-    reason: str | None = Field(description="Required for adjustments from Slice 4.4; empty for receipts.")
+    reason: str | None = Field(description="Required for issues and adjustments (Slice 4.4); empty for receipts.")
     reference: MovementReference | None
+    issued_to: MovementEmployee | None = Field(default=None, description="Issues only: the employee who received it (A4).")
+
+
+MAX_CHANGE_QUANTITY = 1_000_000  # technical limit, like the reorder threshold (B37)
+
+
+class StockIssue(BaseModel):
+    """Issue stock (Slice 4.4, INV-04; owner's answers A4, A4-5a). Reason required;
+    employee optional (active employees only); date defaults to today (company
+    timezone), may be earlier, never in the future."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: int = Field(gt=0, le=MAX_CHANGE_QUANTITY, description="Whole number above 0.")
+    reason: str | None = Field(default=None, max_length=5000, description="Required, up to 500 characters.")
+    employee_id: int | None = Field(default=None, ge=1, description="Optional: the employee who received it.")
+    movement_date: date | None = Field(default=None, description="Default: today. Earlier allowed, future refused.")
+
+
+class StockAdjust(BaseModel):
+    """Adjust stock (Slice 4.4; owner's answers A5, A4-5a): add or remove N with a reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["add", "remove"]
+    quantity: int = Field(gt=0, le=MAX_CHANGE_QUANTITY, description="Whole number above 0.")
+    reason: str | None = Field(default=None, max_length=5000, description="Required, up to 500 characters.")
+    movement_date: date | None = Field(default=None, description="Default: today. Earlier allowed, future refused.")
 
 
 class StockMovementPage(BaseModel):
@@ -91,6 +129,13 @@ class StockMovementPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class StockChangeResult(BaseModel):
+    """What an issue or adjustment returns: the item with its new balance, and the movement."""
+
+    item: StockItemRead
+    movement: StockMovementRead
 
 
 # ---- Requests (quantity_on_hand is deliberately NOT accepted) ---------------------------

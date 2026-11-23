@@ -19,6 +19,9 @@ from app.modules.auth.dependencies import require_roles
 from app.modules.inventory import service
 from app.modules.inventory.models import StockItem
 from app.modules.inventory.schemas import (
+    StockAdjust,
+    StockChangeResult,
+    StockIssue,
     StockItemCreate,
     StockItemPage,
     StockMovementPage,
@@ -108,6 +111,60 @@ def list_movements(item_id: int, params: PageParams = Depends(page_params), db: 
     Unknown item: **404** `stock_item_not_found`."""
     item = service.get_stock_item(db, item_id)
     return service.list_movements(db, item, params)
+
+
+def _change_result(item: StockItem, movement) -> dict:
+    return {"item": item, "movement": service.movement_read(movement)}
+
+
+@router.post(
+    "/{item_id}/issue", response_model=StockChangeResult, summary="Issue stock",
+    responses=error_responses(404, 409, 422),
+)
+def issue_stock(
+    item_id: int,
+    body: StockIssue,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Hand out stock (INV-04; owner's answer A4). Reason required (up to 500); employee
+    optional (active only); date today by default, earlier allowed, future refused.
+    Balance and movement are saved together with audit `stock.issued` (one transaction).
+
+    - More than on hand: **409** `insufficient_stock` (exactly 0 is allowed)
+    - Inactive item: **409** `stock_item_inactive`; unknown item: **404** `stock_item_not_found`
+    - Unknown employee: **404** `employee_not_found`; inactive employee: **409** `employee_inactive`
+    - Missing / too long reason: **422** `invalid_reason`; future date: **422** `movement_date_in_future`"""
+    item, movement = service.issue_stock(
+        db, actor=user, item_id=item_id, quantity=body.quantity, reason=body.reason,
+        employee_id=body.employee_id, movement_date=body.movement_date, context=context,
+    )
+    return _change_result(item, movement)
+
+
+@router.post(
+    "/{item_id}/adjust", response_model=StockChangeResult, summary="Adjust stock",
+    responses=error_responses(404, 409, 422),
+)
+def adjust_stock(
+    item_id: int,
+    body: StockAdjust,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Correct the balance (owner's answer A5): `direction` add or remove, `quantity`, a
+    required reason. No approval step (Q7). Saved with audit `stock.adjusted`.
+
+    - Removing more than on hand: **409** `insufficient_stock`
+    - Inactive item: **409** `stock_item_inactive`; unknown item: **404** `stock_item_not_found`
+    - Missing / too long reason: **422** `invalid_reason`; future date: **422** `movement_date_in_future`"""
+    item, movement = service.adjust_stock(
+        db, actor=user, item_id=item_id, direction=body.direction, quantity=body.quantity,
+        reason=body.reason, movement_date=body.movement_date, context=context,
+    )
+    return _change_result(item, movement)
 
 
 @router.patch(

@@ -35,6 +35,7 @@ from app.core.database import Base, TimestampMixin
 from app.modules.categories.models import AssetCategory
 
 if TYPE_CHECKING:
+    from app.modules.employees.models import Employee
     from app.modules.users.models import User
 
 
@@ -137,6 +138,8 @@ class StockMovement(Base):
             "(movement_type = 'receipt') = (purchase_line_id IS NOT NULL)",
             name="receipt_has_purchase_line",
         ),
+        # Slice 4.4 (A4): only an issue may name the employee who received it.
+        CheckConstraint("movement_type = 'issue' OR issued_to_employee_id IS NULL", name="employee_only_on_issue"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -151,6 +154,10 @@ class StockMovement(Base):
         ForeignKey("purchase_lines.id", ondelete="RESTRICT"), index=True
     )
     reason: Mapped[str | None] = mapped_column(String(REASON_MAX_LENGTH))
+    # Slice 4.4 (A4): the employee an issue went to; optional (rooms, events, teams name none).
+    issued_to_employee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="RESTRICT"), index=True
+    )
     created_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -160,6 +167,7 @@ class StockMovement(Base):
 
     stock_item: Mapped[StockItem] = relationship()
     created_by: Mapped["User"] = relationship(lazy="joined")  # the responsible user (BR-09)
+    issued_to: Mapped["Employee | None"] = relationship(lazy="joined")  # Slice 4.4 (A4)
 
     def __repr__(self) -> str:
         return f"<StockMovement {self.id} {self.movement_type} {self.quantity} item={self.stock_item_id}>"

@@ -20,13 +20,15 @@ RULES
 - BR-12: never deleted. Deactivation only at zero stock (B38).
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Select, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
 from app.core.text import optional_text, required_text
@@ -219,10 +221,23 @@ def list_movements(db: Session, item: StockItem, params: PageParams) -> dict[str
             "created_by": m.created_by,
             "reason": m.reason,
             "reference": references.get(m.purchase_line_id) if m.purchase_line_id is not None else None,
+            "issued_to": m.issued_to,
         }
         for m in page["items"]
     ]
     return page
+
+
+def movement_read(m: StockMovement) -> dict[str, Any]:
+    """One movement in the same shape as the history rows (no purchase reference: only
+    receipts have one, and issues / adjustments never do)."""
+    incoming = m.movement_type in MovementType.INCOMING
+    return {
+        "id": m.id, "movement_type": m.movement_type, "direction": "in" if incoming else "out",
+        "quantity": m.quantity, "change": m.quantity if incoming else -m.quantity,
+        "balance_after": m.balance_after, "movement_date": m.movement_date, "created_at": m.created_at,
+        "created_by": m.created_by, "reason": m.reason, "reference": None, "issued_to": m.issued_to,
+    }
 
 
 # ---- Changing ---------------------------------------------------------------------
@@ -366,6 +381,7 @@ def record_movement(
     actor: User,
     purchase_line_id: int | None = None,
     reason: str | None = None,
+    issued_to_employee_id: int | None = None,
 ) -> StockMovement:
     """Add ONE stock movement and change the item's balance by it, in the caller's
     transaction (B39). Does NOT commit: the caller commits (with its audit row)
@@ -383,6 +399,8 @@ def record_movement(
         raise ValueError("A stock movement's quantity must be a whole number above 0.")
     if (movement_type == MovementType.RECEIPT) != (purchase_line_id is not None):
         raise ValueError("A receipt movement needs its purchase line, and only a receipt has one.")
+    if issued_to_employee_id is not None and movement_type != MovementType.ISSUE:
+        raise ValueError("Only an issue can name the employee who received it.")
     reason = optional_text(reason)
     if reason is not None and len(reason) > REASON_MAX_LENGTH:
         raise AppError(422, "invalid_reason", f"The reason can be at most {REASON_MAX_LENGTH} characters.")
@@ -404,7 +422,141 @@ def record_movement(
         movement_date=movement_date,
         purchase_line_id=purchase_line_id,
         reason=reason,
+        issued_to_employee_id=issued_to_employee_id,
         created_by_user_id=actor.id,
     )
     db.add(movement)
     return movement
+
+
+# ---- Issue and adjust (Slice 4.4: INV-04, INV-07, BR-09, BR-10, BR-13; A4, A5, A4-5a) ---------
+def _today() -> date:
+    """Today's date in the company timezone (Q11), as for purchase and received dates."""
+    return datetime.now(ZoneInfo(get_settings().app_timezone)).date()
+
+
+def _change_date(value: date | None) -> date:
+    """The movement's business date (C2): today by default; earlier allowed; never in the future (A4-5a)."""
+    if value is None:
+        return _today()
+    if value > _today():
+        raise AppError(422, "movement_date_in_future", "The date cannot be in the future.")
+    return value
+
+
+def _change_reason(value: str | None) -> str:
+    """Required for every issue and adjustment (Q7, C3): trimmed, up to 500 characters."""
+    reason = optional_text(value)
+    if reason is None:
+        raise AppError(422, "invalid_reason", "Please enter the reason.")
+    if len(reason) > REASON_MAX_LENGTH:
+        raise AppError(422, "invalid_reason", f"The reason can be at most {REASON_MAX_LENGTH} characters.")
+    return reason
+
+
+def _locked_usable_item(db: Session, item_id: int) -> StockItem:
+    """Row-lock the item (C11) and refuse an inactive one (B38, B41)."""
+    item = lock_stock_items(db, [item_id])[item_id]
+    if not item.is_active:
+        raise AppError(409, "stock_item_inactive", f'Stock item "{item.name}" is deactivated.')
+    return item
+
+
+def _issue_employee(db: Session, employee_id: int | None):
+    """The optional employee an issue goes to: must exist and be active (A4, EMP-05)."""
+    if employee_id is None:
+        return None
+    from app.modules.employees import service as employees_service
+
+    employee = employees_service.get_employee(db, employee_id)  # 404 employee_not_found
+    if not employee.is_active:
+        raise AppError(
+            409, "employee_inactive", f"{employee.full_name} is deactivated. Stock cannot be issued to them."
+        )
+    return employee
+
+
+def _change_stock(
+    db: Session,
+    *,
+    actor: User,
+    item_id: int,
+    movement_type: str,
+    quantity: int,
+    reason: str | None,
+    movement_date: date | None,
+    employee_id: int | None,
+    action: str,
+    context: AuditContext | None,
+) -> tuple[StockItem, StockMovement]:
+    """The one path for issues and adjustments: lock the item, check everything, write the
+    movement + new balance (record_movement) and the audit row, then commit. Any failure
+    rolls everything back, so nothing is saved."""
+    try:
+        item = _locked_usable_item(db, item_id)
+        employee = _issue_employee(db, employee_id)
+        when = _change_date(movement_date)
+        clean_reason = _change_reason(reason)
+        before = {"quantity_on_hand": item.quantity_on_hand}
+        movement = record_movement(
+            db, item=item, movement_type=movement_type, quantity=quantity, movement_date=when,
+            actor=actor, reason=clean_reason, issued_to_employee_id=employee.id if employee else None,
+        )
+        db.flush()  # gives the movement its id for the audit row
+        after = {
+            "quantity_on_hand": item.quantity_on_hand,
+            "movement_id": movement.id,
+            "movement_type": movement_type,
+            "quantity": quantity,
+            "movement_date": when,
+            "reason": clean_reason,
+        }
+        if employee is not None:
+            after["issued_to"] = {"id": employee.id, "employee_code": employee.employee_code, "full_name": employee.full_name}
+        audit.record(db, actor=actor, action=action, entity=item, before=before, after=after, context=context)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(item)
+    db.refresh(movement)
+    return item, movement
+
+
+def issue_stock(
+    db: Session,
+    *,
+    actor: User,
+    item_id: int,
+    quantity: int,
+    reason: str | None,
+    employee_id: int | None = None,
+    movement_date: date | None = None,
+    context: AuditContext | None = None,
+) -> tuple[StockItem, StockMovement]:
+    """Issue stock (INV-04, A4): an `issue` movement; never below 0 (`insufficient_stock`,
+    INV-07 / BR-10); optional active employee; audit `stock.issued`."""
+    return _change_stock(
+        db, actor=actor, item_id=item_id, movement_type=MovementType.ISSUE, quantity=quantity, reason=reason,
+        movement_date=movement_date, employee_id=employee_id, action=AuditAction.STOCK_ISSUED, context=context,
+    )
+
+
+def adjust_stock(
+    db: Session,
+    *,
+    actor: User,
+    item_id: int,
+    direction: str,
+    quantity: int,
+    reason: str | None,
+    movement_date: date | None = None,
+    context: AuditContext | None = None,
+) -> tuple[StockItem, StockMovement]:
+    """Adjust stock (A5): add (`adjustment_in`) or remove (`adjustment_out`, never below 0)
+    N with a required reason; audit `stock.adjusted`. No approval step (Q7)."""
+    movement_type = MovementType.ADJUSTMENT_IN if direction == "add" else MovementType.ADJUSTMENT_OUT
+    return _change_stock(
+        db, actor=actor, item_id=item_id, movement_type=movement_type, quantity=quantity, reason=reason,
+        movement_date=movement_date, employee_id=None, action=AuditAction.STOCK_ADJUSTED, context=context,
+    )
