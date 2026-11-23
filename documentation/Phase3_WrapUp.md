@@ -151,7 +151,7 @@ will not decide these alone.
 | A6 | **Opening stock (4.5):** allowed only once per item and only while it has no movements at all? Who may enter it? *(Proposed: once per item, only with no movements yet; Admin and IT Manager.)* | 4.5 |
 | A7 | **Manual asset entry (4.5):** same required fields as receiving (serial and model; P5)? Purchase date, cost and vendor optional? Always created as Available? *(Proposed: yes; optional purchase date and cost, no vendor; always Available.)* | 4.5 |
 
-**Answered since:** A1 (decisions.md E1, 2026-11-20); A2 and A3 (decisions.md section 19, 2026-11-22). A4–A7 are still open.
+**Answered since:** A1 (decisions.md E1, 2026-11-20); A2 and A3 (decisions.md section 19, 2026-11-22); A4 and A5 (decisions.md section 22, 2026-11-23). A6–A7 are still open.
 
 Still open from earlier:
 - **R2** (temporary passwords) and **Q12** (hosting and domain) don't block Phase 4.

@@ -23,7 +23,7 @@ page `/assets/AST-000001` with details, purchase and history) is signed off (202
 Edit and retire assets (4.2: **Edit** the allowed details, **Retire…** with a required reason,
 every change in the asset's history) is signed off (2026-11-22). Stock balances (4.3: **Low stock**
 badge and filter on Inventory, stock item page `/inventory/:id` with its movement history) is signed
-off (2026-11-23). Next: Slice 4.4 (stock issue and adjustment; owner answers A4–A5 needed first).
+off (2026-11-23). Next: Slice 4.4 (stock issue and adjustment; owner answers A4–A5 recorded in decisions.md section 22).
 Business pages not built yet show "Coming soon" until their phase.
 
 ---
