@@ -1,4 +1,5 @@
-"""Stock item endpoints: /api/v1/stock-items/... (Slice 2.4, INV-01).
+"""Stock item endpoints: /api/v1/stock-items/... (Slice 2.4, INV-01; Slice 4.3: the
+low-stock flag and filter, and each item's movement history, INV-02, INV-05, INV-06).
 
 ADMIN AND IT MANAGER ONLY: the whole router requires one of those roles
 (checked on the server for every request), so an Employee gets 403 on all of these.
@@ -20,6 +21,7 @@ from app.modules.inventory.models import StockItem
 from app.modules.inventory.schemas import (
     StockItemCreate,
     StockItemPage,
+    StockMovementPage,
     StockItemRead,
     StockItemStatusField,
     StockItemUpdate,
@@ -42,11 +44,18 @@ def list_stock_items(
     search: str | None = Query(None, max_length=100, description="Part of the item name (any case)."),
     category_id: int | None = Query(None, description="Only items in this category."),
     status_filter: StockItemStatusField | None = Query(None, alias="status", description="Only active or inactive."),
+    low_stock: bool | None = Query(
+        None, description="true = only active items at or below their reorder threshold; false = all others."
+    ),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Paged list. Sort by `name`, `category`, `unit_of_measure`, `reorder_threshold`,
-    `quantity_on_hand`, `status` or `updated_at` (prefix `-` for descending)."""
-    return service.list_stock_items(db, params, search=search, category_id=category_id, status=status_filter)
+    """Paged list. Each item says whether it is `low_stock` (active, quantity on hand at
+    or below the reorder threshold). Filters combine. Sort by `name`, `category`,
+    `unit_of_measure`, `reorder_threshold`, `quantity_on_hand`, `status` or `updated_at`
+    (prefix `-` for descending)."""
+    return service.list_stock_items(
+        db, params, search=search, category_id=category_id, status=status_filter, low_stock=low_stock
+    )
 
 
 @router.post(
@@ -86,6 +95,19 @@ def create_stock_item(
 )
 def get_stock_item(item_id: int, db: Session = Depends(get_db)) -> StockItem:
     return service.get_stock_item(db, item_id)
+
+
+@router.get(
+    "/{item_id}/movements", response_model=StockMovementPage, summary="A stock item's movement history",
+    responses=error_responses(404),
+)
+def list_movements(item_id: int, params: PageParams = Depends(page_params), db: Session = Depends(get_db)) -> dict:
+    """Every stock movement of this item (INV-05), newest first in the order saved, with
+    type, signed change, balance after, business date, saved at, who, reason and what
+    caused it (a receipt's purchase). Inactive items keep their history.
+    Unknown item: **404** `stock_item_not_found`."""
+    item = service.get_stock_item(db, item_id)
+    return service.list_movements(db, item, params)
 
 
 @router.patch(

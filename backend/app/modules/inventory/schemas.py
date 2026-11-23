@@ -1,11 +1,12 @@
-"""Request and response shapes for stock items (Slice 2.4, INV-01).
+"""Request and response shapes for stock items (Slice 2.4, INV-01; Slice 4.3: the
+low-stock flag and the movement history, INV-02, INV-05, INV-06).
 
 quantity_on_hand is in the RESPONSE only (read-only). The request models
 forbid unknown fields, so sending quantity_on_hand is a validation error:
 the balance only changes through stock movements (Slices 3.3, 4.4, 4.5).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +38,9 @@ class StockItemRead(BaseModel):
     unit_of_measure: UnitField
     reorder_threshold: int
     quantity_on_hand: int = Field(description="Read-only. Changes only through stock movements.")
+    low_stock: bool = Field(
+        description="Active item with quantity on hand at or below its reorder threshold (INV-06, B37, G1)."
+    )
     status: StockItemStatusField
     created_at: datetime
     updated_at: datetime
@@ -46,6 +50,44 @@ class StockItemPage(BaseModel):
     """One page of stock items: the shared paged-list format."""
 
     items: list[StockItemRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class MovementUser(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+
+
+class MovementReference(BaseModel):
+    """What caused the movement. Receipts: their purchase (C3). Later slices add others."""
+
+    purchase_id: int
+    purchase_number: str
+    purchase_line_id: int
+
+
+class StockMovementRead(BaseModel):
+    """One line of a stock item's movement history (INV-05, BR-09)."""
+
+    id: int
+    movement_type: Literal["receipt", "issue", "adjustment_in", "adjustment_out", "opening"]
+    direction: Literal["in", "out"]
+    quantity: int = Field(description="Always above 0; `direction` says whether stock went in or out.")
+    change: int = Field(description="Signed change to the balance: +quantity in, -quantity out.")
+    balance_after: int = Field(description="The item's balance right after this movement (C4).")
+    movement_date: date = Field(description="The business date, e.g. the received date (C2).")
+    created_at: datetime = Field(description="When it was saved (UTC).")
+    created_by: MovementUser
+    reason: str | None = Field(description="Required for adjustments from Slice 4.4; empty for receipts.")
+    reference: MovementReference | None
+
+
+class StockMovementPage(BaseModel):
+    items: list[StockMovementRead]
     total: int
     page: int
     page_size: int

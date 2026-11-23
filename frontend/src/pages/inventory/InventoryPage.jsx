@@ -1,14 +1,18 @@
 // Inventory page (Admin and IT Manager): items tracked BY QUANTITY (Slice 2.4, INV-01).
 // List, search by name, filter by category and status; add and edit items;
 // deactivate (after a confirm box) or activate them. No delete (BR-12).
-// Quantity on hand is read-only (0 until stock is received in Slice 3.3).
-// Slice 4.3 adds the low-stock flag and movement history to this page.
+// Quantity on hand is read-only (it changes only through stock movements).
+// Slice 4.3 (INV-02, INV-06): a "Low stock" badge on active items at or below their
+// reorder threshold (B37, G1), a Stock level filter, and the item name opens the item's
+// page /inventory/:id with its movement history (the row itself is not clickable,
+// because it also has Edit / Deactivate buttons, as on Purchases, D7).
 import { useCallback, useEffect, useState } from 'react'
+import { Link as RouterLink } from 'react-router'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
-import { Button, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { Button, IconButton, Link, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
 
 import { listCategories } from '../../api/categories'
 import { getErrorMessage } from '../../api/errors'
@@ -17,6 +21,7 @@ import ConfirmDialog from '../../components/ConfirmDialog'
 import DataTable from '../../components/DataTable'
 import StatusBadge, { recordStatusLabel } from '../../components/StatusBadge'
 import { useNotify } from '../../context/NotificationContext'
+import LowStockBadge from './LowStockBadge'
 import StockItemFormDialog from './StockItemFormDialog'
 
 export default function InventoryPage() {
@@ -24,11 +29,13 @@ export default function InventoryPage() {
 
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [stockFilter, setStockFilter] = useState('') // '' | 'low'
   // While any filter is set: a Clear filters button, and "No matches" for an empty result (D9).
-  const filtersActive = Boolean(categoryFilter || statusFilter)
+  const filtersActive = Boolean(categoryFilter || statusFilter || stockFilter)
   const clearFilters = () => {
     setCategoryFilter('')
     setStatusFilter('')
+    setStockFilter('')
   }
   const [bulkCategories, setBulkCategories] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
@@ -46,8 +53,9 @@ export default function InventoryPage() {
   }, [reloadKey])
 
   const fetchRows = useCallback(
-    (args) => listStockItems({ ...args, categoryId: categoryFilter, status: statusFilter }),
-    [categoryFilter, statusFilter],
+    (args) =>
+      listStockItems({ ...args, categoryId: categoryFilter, status: statusFilter, lowStock: stockFilter === 'low' ? true : undefined }),
+    [categoryFilter, statusFilter, stockFilter],
   )
 
   const toggleActive = async () => {
@@ -64,7 +72,16 @@ export default function InventoryPage() {
   }
 
   const columns = [
-    { field: 'name', label: 'Item', sortable: true },
+    {
+      field: 'name',
+      label: 'Item',
+      sortable: true,
+      render: (it) => (
+        <Link component={RouterLink} to={`/inventory/${it.id}`} underline="hover">
+          {it.name}
+        </Link>
+      ),
+    },
     { field: 'category', label: 'Category', sortable: true, render: (it) => it.category.name },
     { field: 'unit_of_measure', label: 'Unit', sortable: true, render: (it) => unitLabel(it.unit_of_measure) },
     { field: 'reorder_threshold', label: 'Reorder threshold', sortable: true, align: 'right' },
@@ -74,9 +91,12 @@ export default function InventoryPage() {
       sortable: true,
       align: 'right',
       render: (it) => (
-        <Tooltip title="Read-only: changes only through receiving, issuing or adjusting stock">
-          <span>{it.quantity_on_hand}</span>
-        </Tooltip>
+        <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+          {it.low_stock ? <LowStockBadge /> : null}
+          <Tooltip title="Read-only: changes only through receiving, issuing or adjusting stock">
+            <span>{it.quantity_on_hand}</span>
+          </Tooltip>
+        </Stack>
       ),
     },
     {
@@ -143,6 +163,17 @@ export default function InventoryPage() {
         <MenuItem value="">All</MenuItem>
         <MenuItem value="active">Active</MenuItem>
         <MenuItem value="inactive">Inactive</MenuItem>
+      </TextField>
+      <TextField
+        select
+        size="small"
+        label="Stock level"
+        value={stockFilter}
+        onChange={(e) => setStockFilter(e.target.value)}
+        sx={{ minWidth: 150 }}
+      >
+        <MenuItem value="">All</MenuItem>
+        <MenuItem value="low">Low stock</MenuItem>
       </TextField>
       {filtersActive ? (
         <Button size="small" onClick={clearFilters}>

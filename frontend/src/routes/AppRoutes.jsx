@@ -19,6 +19,7 @@ import AssetsPage from '../pages/assets/AssetsPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
+import StockItemDetailPage from '../pages/inventory/StockItemDetailPage'
 import PurchaseDetailPage from '../pages/purchases/PurchaseDetailPage'
 import PurchasesPage from '../pages/purchases/PurchasesPage'
 import UsersPage from '../pages/users/UsersPage'
@@ -49,6 +50,7 @@ const DETAIL_PAGES = [
   { path: '/vendors/:vendorId', parent: '/vendors', Page: VendorDetailPage },
   { path: '/purchases/:purchaseId', parent: '/purchases', Page: PurchaseDetailPage }, // Slice 3.4
   { path: '/assets/:assetId', parent: '/assets', Page: AssetDetailPage }, // Slice 4.1
+  { path: '/inventory/:itemId', parent: '/inventory', Page: StockItemDetailPage }, // Slice 4.3
 ]
 
 function HomeRedirect() {

@@ -160,8 +160,11 @@ def list_stock_items(
     search: str | None = None,
     category_id: int | None = None,
     status: str | None = None,
+    low_stock: bool | None = None,
 ) -> dict[str, Any]:
-    """Paged list. `search` matches part of the name, ignoring case.
+    """Paged list. `search` matches part of the name, ignoring case. `low_stock=True`
+    keeps only active items at or below their reorder threshold (INV-06, B37, G1);
+    `False` keeps every other item. All filters combine.
 
     Rows with the same sort value (e.g. two items in one category) are ordered by id in
     the sort's direction, so the order is stable and paging never repeats or skips a row (E10)."""
@@ -172,7 +175,54 @@ def list_stock_items(
         stmt = stmt.where(StockItem.category_id == category_id)
     if status:
         stmt = stmt.where(StockItem.status == status)
+    if low_stock is True:
+        stmt = stmt.where(StockItem.low_stock_condition())
+    elif low_stock is False:
+        stmt = stmt.where(~StockItem.low_stock_condition())
     return paginate(db, stmt, params, sortable=_SORTABLE, default_sort="name", tiebreaker=StockItem.id)
+
+
+def list_movements(db: Session, item: StockItem, params: PageParams) -> dict[str, Any]:
+    """The item's movement history (INV-05, Slice 4.3): newest first in the order the
+    movements were SAVED (G2), so `balance_after` reads as a running balance. Movements
+    saved together (e.g. two lines of one receipt, C6) keep their order by id.
+    Each row says who saved it, when, the business date, and what caused it."""
+    from app.modules.purchases.models import Purchase, PurchaseLine
+
+    stmt = select(StockMovement).where(StockMovement.stock_item_id == item.id)
+    page = paginate(
+        db, stmt, params, sortable={"created_at": StockMovement.created_at},
+        default_sort="-created_at", tiebreaker=StockMovement.id,
+    )
+    line_ids = {m.purchase_line_id for m in page["items"] if m.purchase_line_id is not None}
+    references: dict[int, dict[str, Any]] = {}
+    if line_ids:
+        rows = db.execute(
+            select(PurchaseLine.id, Purchase.id, Purchase.purchase_number)
+            .join(Purchase, PurchaseLine.purchase_id == Purchase.id)
+            .where(PurchaseLine.id.in_(line_ids))
+        )
+        references = {
+            line_id: {"purchase_id": pid, "purchase_number": number, "purchase_line_id": line_id}
+            for line_id, pid, number in rows
+        }
+    page["items"] = [
+        {
+            "id": m.id,
+            "movement_type": m.movement_type,
+            "direction": "in" if m.movement_type in MovementType.INCOMING else "out",
+            "quantity": m.quantity,
+            "change": m.quantity if m.movement_type in MovementType.INCOMING else -m.quantity,
+            "balance_after": m.balance_after,
+            "movement_date": m.movement_date,
+            "created_at": m.created_at,
+            "created_by": m.created_by,
+            "reason": m.reason,
+            "reference": references.get(m.purchase_line_id) if m.purchase_line_id is not None else None,
+        }
+        for m in page["items"]
+    ]
+    return page
 
 
 # ---- Changing ---------------------------------------------------------------------

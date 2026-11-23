@@ -78,6 +78,18 @@ class StockItem(TimestampMixin, Base):
     category: Mapped[AssetCategory] = relationship(lazy="joined")
 
     @property
+    def low_stock(self) -> bool:
+        """Low stock (INV-06, Slice 4.3): an ACTIVE item whose quantity on hand is at or
+        below its reorder threshold (B37: a threshold of 0 warns only when stock runs out).
+        Inactive items are never flagged: they always have 0 and cannot be restocked (G1)."""
+        return self.status == StockItemStatus.ACTIVE and self.quantity_on_hand <= self.reorder_threshold
+
+    @classmethod
+    def low_stock_condition(cls):
+        """The same rule as `low_stock`, for SQL filters."""
+        return (cls.status == StockItemStatus.ACTIVE) & (cls.quantity_on_hand <= cls.reorder_threshold)
+
+    @property
     def is_active(self) -> bool:
         return self.status == StockItemStatus.ACTIVE
 

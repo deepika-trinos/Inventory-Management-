@@ -1,6 +1,8 @@
 // Calls to the stock item endpoints (/api/v1/stock-items, Slice 2.4).
 // Admin and IT Manager only. No delete (BR-12). quantity_on_hand is read-only:
 // only stock movements change it (Slices 3.3, 4.4, 4.5).
+// Slice 4.3: each item's low_stock flag (active and at or below its reorder threshold,
+// B37 / G1), the low-stock filter, one item, and its movement history (INV-05).
 import apiClient from './client'
 
 const BASE = '/api/v1/stock-items'
@@ -20,14 +22,29 @@ export function unitLabel(value) {
   return UNITS.find((u) => u.value === value)?.label ?? value
 }
 
-// { page, pageSize, sort, search, categoryId, status } -> { items, total, page, page_size }
-export async function listStockItems({ page = 1, pageSize = 20, sort, search, categoryId, status }) {
+// { page, pageSize, sort, search, categoryId, status, lowStock } -> { items, total, page, page_size }
+// lowStock: true = only low-stock items; false = all others; '' / undefined = all.
+export async function listStockItems({ page = 1, pageSize = 20, sort, search, categoryId, status, lowStock }) {
   const params = { page, page_size: pageSize }
   if (sort) params.sort = sort
   if (search) params.search = search
   if (categoryId) params.category_id = categoryId
   if (status) params.status = status
+  if (lowStock === true || lowStock === false) params.low_stock = lowStock
   const { data } = await apiClient.get(BASE, { params })
+  return data
+}
+
+export async function getStockItem(id) {
+  const { data } = await apiClient.get(`${BASE}/${encodeURIComponent(id)}`)
+  return data
+}
+
+// The item's movement history, newest saved first (G2): { items, total, page, page_size }.
+export async function getStockMovements(id, { page = 1, pageSize = 20 } = {}) {
+  const { data } = await apiClient.get(`${BASE}/${encodeURIComponent(id)}/movements`, {
+    params: { page, page_size: pageSize },
+  })
   return data
 }
 
