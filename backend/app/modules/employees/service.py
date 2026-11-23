@@ -1,7 +1,8 @@
 """Employees: list, get, create, edit, activate/deactivate (Slice 2.2, EMP-01 to EMP-03).
 
 Used by the /employees endpoints (Admin and IT Manager) and the Users screen's
-employee picker. Later: assignments (Phase 5, EMP-04/EMP-05).
+employee picker. Slice 5.1: an employee who still holds assets cannot be
+deactivated (N6). Later: assignment history (Slice 5.3, EMP-04).
 
 Every change writes an audit row in the SAME transaction (BR-13, B11).
 
@@ -234,6 +235,29 @@ def update_employee(
     return _save(db, actor=actor, action=AuditAction.EMPLOYEE_UPDATED, employee=employee, before=before, context=context)
 
 
+def _ensure_holds_no_assets(db: Session, employee: Employee) -> None:
+    """N6 (Slice 5.1): an employee who still holds assets cannot be deactivated; the
+    message lists them. The employee row is locked first, so an assignment being saved
+    at the same moment (it share-locks the row) either finishes before this check or
+    waits and then sees the employee as inactive."""
+    from app.modules.assignments import service as assignments_service
+
+    db.execute(
+        select(Employee.id).where(Employee.id == employee.id).with_for_update()
+    )
+    held = assignments_service.open_assignments_for_employee(db, employee.id)
+    if not held:
+        return
+    assets = [{"id": a.asset.id, "asset_code": a.asset.asset_code, "name": a.asset.name} for a in held]
+    message = (
+        f"{employee.full_name} ({employee.employee_code}) still holds "
+        f"{len(assets)} {'asset' if len(assets) == 1 else 'assets'}: {', '.join(a['asset_code'] for a in assets)}. "
+        f"Return {'it' if len(assets) == 1 else 'them'} before deactivating this employee."
+    )
+    db.rollback()  # releases the lock; nothing was changed
+    raise AppError(409, "employee_has_assets", message, {"assets": assets})
+
+
 def set_active(
     db: Session,
     *,
@@ -250,6 +274,8 @@ def set_active(
     new_status = EmployeeStatus.ACTIVE if active else EmployeeStatus.INACTIVE
     if employee.status == new_status:
         return employee  # already in that state
+    if not active:
+        _ensure_holds_no_assets(db, employee)
 
     login = None if active else _linked_user(db, employee)
     if login is not None and login.is_active:

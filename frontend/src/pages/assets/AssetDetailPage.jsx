@@ -11,14 +11,25 @@
 // History lists each edit (old -> new value) and the retirement with its reason.
 // Slice 4.5: an asset entered by hand shows "Entered by hand" next to its status and in
 // its Purchase section (with its purchase date and cost, if typed).
+// Slice 5.1 (ASN-01 to ASN-04): an "Assign…" button (only for Available assets; greyed
+// out with the reason otherwise) opening a form and a confirm box; an "Assigned to"
+// section with the current holder; history shows "Assigned to Asha Kumar (EMP-001)".
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
+import PersonAddAltOutlined from '@mui/icons-material/PersonAddAltOutlined'
 import { Box, Button, Chip, Divider, Link, Paper, Stack, Tooltip, Typography } from '@mui/material'
 
-import { assetStatusLabel, getAsset, getAssetHistory, historyActionLabel, RETIRABLE_STATUSES } from '../../api/assets'
+import {
+  assetStatusLabel,
+  assignBlockedReason,
+  getAsset,
+  getAssetHistory,
+  historyActionLabel,
+  RETIRABLE_STATUSES,
+} from '../../api/assets'
 import { getErrorCode } from '../../api/errors'
 import DataTable from '../../components/DataTable'
 import EmptyState from '../../components/EmptyState'
@@ -28,6 +39,7 @@ import StatusBadge from '../../components/StatusBadge'
 import { formatDateTime, formatPlainDate } from '../../utils/dates'
 import { formatAmount } from '../../utils/money'
 import { useNotify } from '../../context/NotificationContext'
+import AssetAssignDialog, { employeeName } from './AssetAssignDialog'
 import AssetEditDialog from './AssetEditDialog'
 import AssetRetireDialog from './AssetRetireDialog'
 
@@ -85,6 +97,17 @@ export function historyNote(entry) {
   if (entry.action === 'asset.created') {
     return after.purchase_number ? `Received on purchase ${after.purchase_number}` : 'Entered by hand'
   }
+  if (entry.action === 'assignment.created') {
+    // e.g. "Assigned to Asha Kumar (EMP-001) · from 23 Nov 2026 · expected back 23 Dec 2026"
+    const who = after.employee_name ? `${after.employee_name} (${after.employee_code})` : 'an employee'
+    return [
+      `Assigned to ${who}`,
+      after.assignment_date ? `from ${formatPlainDate(after.assignment_date)}` : null,
+      after.expected_return_date ? `expected back ${formatPlainDate(after.expected_return_date)}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  }
   if (entry.action === 'asset.updated') {
     // e.g. "Location: Bangalore Floor 2 → Chennai; Serial number: DL-1O01 → DL-1001"
     // category_id is shown by name (the "category" entry), not by number.
@@ -124,7 +147,7 @@ export default function AssetDetailPage() {
   const [asset, setAsset] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [dialog, setDialog] = useState(null) // 'edit' | 'retire'
+  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign'
   const [historyKey, setHistoryKey] = useState(0)
   const notify = useNotify()
 
@@ -164,6 +187,8 @@ export default function AssetDetailPage() {
   const purchase = a.purchase
   const retired = a.status === 'retired'
   const canRetire = RETIRABLE_STATUSES.includes(a.status)
+  const assignBlocked = assignBlockedReason(a.status)
+  const holder = a.current_assignment
 
   // After a save: show the new values and the new history entry.
   const afterChange = (saved, message) => {
@@ -196,6 +221,18 @@ export default function AssetDetailPage() {
           </Typography>
         ) : (
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+            <Tooltip title={assignBlocked}>
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<PersonAddAltOutlined />}
+                  disabled={Boolean(assignBlocked)}
+                  onClick={() => setDialog('assign')}
+                >
+                  Assign…
+                </Button>
+              </span>
+            </Tooltip>
             <Button variant="outlined" startIcon={<EditOutlined />} onClick={() => setDialog('edit')}>
               Edit
             </Button>
@@ -231,6 +268,25 @@ export default function AssetDetailPage() {
           {retired ? <Detail label="Reason for retiring" testId="asset-retire-reason" value={a.retire_reason} /> : null}
         </Box>
       </Section>
+
+      {holder ? (
+        <Section title="Assigned to">
+          <Box sx={grid}>
+            <Detail
+              label="Employee"
+              testId="asset-assigned-to"
+              value={`${employeeName(holder.employee)}${holder.employee.status !== 'active' ? ' (inactive)' : ''}`}
+            />
+            <Detail label="Assignment date" testId="asset-assignment-date" value={formatPlainDate(holder.assignment_date)} />
+            <Detail
+              label="Expected return"
+              testId="asset-expected-return"
+              value={holder.expected_return_date ? formatPlainDate(holder.expected_return_date) : 'Not set'}
+            />
+            <Detail label="Assigned by" value={`${holder.assigned_by.email} · ${formatDateTime(holder.created_at)}`} />
+          </Box>
+        </Section>
+      ) : null}
 
       <Section title="Purchase">
         {purchase ? (
@@ -279,6 +335,17 @@ export default function AssetDetailPage() {
           asset={a}
           onClose={() => setDialog(null)}
           onSaved={(saved) => afterChange(saved, `${saved.asset_code} saved.`)}
+        />
+      ) : null}
+
+      {dialog === 'assign' ? (
+        <AssetAssignDialog
+          open
+          asset={a}
+          onClose={() => setDialog(null)}
+          onAssigned={(saved) =>
+            afterChange(saved, `${saved.asset_code} assigned to ${employeeName(saved.current_assignment?.employee)}.`)
+          }
         />
       ) : null}
 

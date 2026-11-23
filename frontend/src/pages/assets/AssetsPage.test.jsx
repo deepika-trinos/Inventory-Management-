@@ -1,6 +1,7 @@
 // Tests for the Assets page, the asset register (Slice 4.1, AST-03, AST-05): columns,
 // search, the category / status / location filters (combined), Clear filters and
 // "No matches" (D9), and clickable rows that open the asset page (D7).
+// Slice 5.1 (A1): the "Assigned to" column and filter (active and inactive employees).
 // The server is replaced by stand-ins (no network). Run with: npm test
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router'
@@ -8,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createAsset, listAssetLocations, listAssets } from '../../api/assets'
 import { listCategories } from '../../api/categories'
+import { listEmployees } from '../../api/employees'
 import { NotificationProvider } from '../../context/NotificationContext'
 import AssetsPage from './AssetsPage'
 
@@ -18,6 +20,7 @@ vi.mock('../../api/assets', async (importOriginal) => ({
   createAsset: vi.fn(),
 }))
 vi.mock('../../api/categories', async (importOriginal) => ({ ...(await importOriginal()), listCategories: vi.fn() }))
+vi.mock('../../api/employees', async (importOriginal) => ({ ...(await importOriginal()), listEmployees: vi.fn() }))
 
 const page = (items) => ({ items, total: items.length, page: 1, page_size: 20 })
 const T = '2026-11-12T05:00:00Z'
@@ -27,14 +30,16 @@ const asset = (id, extra) => ({
   id, asset_code: `AST-00000${id}`, brand: 'Dell', model: 'Latitude 5440', status: 'available', location: null,
   warranty_expiry: null, created_at: T, category: LAPTOPS, ...extra,
 })
+const ASHA = { id: 7, employee_code: 'EMP-001', full_name: 'Asha Kumar', status: 'active' }
+const OLD = { id: 9, employee_code: 'EMP-009', full_name: 'Old Timer', status: 'inactive' }
 const ASSETS = [
   asset(1, { name: 'Laptops: Dell Latitude 5440', serial_number: 'DL-1001', location: 'Chennai' }),
-  asset(2, { name: 'CEO laptop', serial_number: 'DL-1002', status: 'assigned' }),
+  asset(2, { name: 'CEO laptop', serial_number: 'DL-1002', status: 'assigned', assigned_to: ASHA }),
   asset(3, { name: 'Spare monitor', serial_number: 'MON-1', brand: null, model: 'P2422H', category: MONITORS, location: 'Chennai' }),
 ]
 
 // A stand-in server that searches and filters like the real one (every filter must match).
-function fakeList({ search, categoryId, status, location }) {
+function fakeList({ search, categoryId, status, location, assignedTo }) {
   const term = (search ?? '').toLowerCase()
   return Promise.resolve(
     page(
@@ -43,7 +48,8 @@ function fakeList({ search, categoryId, status, location }) {
           (!term || [a.asset_code, a.serial_number, a.name].some((v) => v.toLowerCase().includes(term))) &&
           (!categoryId || a.category.id === categoryId) &&
           (!status || a.status === status) &&
-          (!location || (a.location ?? '').toLowerCase() === location.toLowerCase()),
+          (!location || (a.location ?? '').toLowerCase() === location.toLowerCase()) &&
+          (!assignedTo || a.assigned_to?.id === assignedTo),
       ),
     ),
   )
@@ -54,6 +60,7 @@ beforeEach(() => {
   listAssets.mockImplementation(fakeList)
   listAssetLocations.mockResolvedValue(['Chennai'])
   listCategories.mockResolvedValue(page([LAPTOPS, MONITORS]))
+  listEmployees.mockResolvedValue(page([ASHA, OLD]))
 })
 
 function AssetPageStandIn() {
@@ -88,7 +95,7 @@ describe('AssetsPage', () => {
     await screen.findByText('AST-000001')
 
     expect(listAssets.mock.calls[0][0]).toMatchObject({ page: 1, sort: '-asset_code' })
-    for (const header of ['Asset ID', 'Name', 'Category', 'Serial number', 'Model', 'Location', 'Status']) {
+    for (const header of ['Asset ID', 'Name', 'Category', 'Serial number', 'Model', 'Location', 'Status', 'Assigned to']) {
       expect(screen.getByRole('columnheader', { name: header })).toBeTruthy()
     }
     const first = within(dataRows()[0])
@@ -99,7 +106,8 @@ describe('AssetsPage', () => {
     expect(first.getByText('Chennai')).toBeTruthy()
     expect(first.getByText('Available')).toBeTruthy()
     expect(within(dataRows()[1]).getByText('Assigned')).toBeTruthy()
-    expect(screen.queryByRole('combobox', { name: /Employee/ })).toBeNull() // A1: arrives in Slice 5.1
+    expect(within(dataRows()[1]).getByText('Asha Kumar (EMP-001)')).toBeTruthy() // A1
+    expect(within(dataRows()[0]).getAllByRole('cell').at(-1).textContent).toBe('—') // nobody holds it
   })
 
   it('finds an asset by ID, serial number or name', async () => {
@@ -202,5 +210,66 @@ describe('AssetsPage: Add existing asset', () => {
 
     expect(await screen.findByText('Asset page AST-000009')).toBeTruthy()
     expect(screen.getByText('AST-000009 added.')).toBeTruthy()
+  })
+})
+
+// Slice 5.1 (owner's answer A1): "Assigned to" column and filter.
+describe('AssetsPage: Assigned to', () => {
+  async function pickHolder(name) {
+    const box = screen.getByRole('combobox', { name: 'Assigned to' })
+    fireEvent.change(box, { target: { value: name.slice(0, 3) } })
+    fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }))
+  }
+
+  it('the filter offers active and inactive employees (inactive marked)', async () => {
+    renderPage()
+    await screen.findByText('AST-000001')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Assigned to' }))
+
+    expect(await screen.findByRole('option', { name: 'EMP-009 · Old Timer (inactive)' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'EMP-001 · Asha Kumar' })).toBeTruthy()
+    const call = listEmployees.mock.calls.at(-1)[0]
+    expect(call.status).toBeUndefined() // both active and inactive
+    expect(call.hasLogin).toBeUndefined()
+  })
+
+  it('lists only what the chosen employee holds, and Clear filters resets it', async () => {
+    renderPage()
+    await screen.findByText('AST-000001')
+
+    await pickHolder('Asha Kumar')
+    await waitFor(() => expect(shownCodes()).toEqual(['AST-000002']))
+    expect(listAssets.mock.calls.at(-1)[0]).toMatchObject({ assignedTo: 7 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await waitFor(() => expect(shownCodes()).toHaveLength(3))
+    expect(listAssets.mock.calls.at(-1)[0].assignedTo).toBeUndefined()
+    expect(screen.getByRole('combobox', { name: 'Assigned to' }).value).toBe('')
+  })
+
+  it('an employee holding nothing gives "No matches"', async () => {
+    renderPage()
+    await screen.findByText('AST-000001')
+
+    await pickHolder('Old Timer')
+
+    expect(await screen.findByText('No matches')).toBeTruthy()
+    expect(listAssets.mock.calls.at(-1)[0]).toMatchObject({ assignedTo: 9 })
+  })
+
+  it('combines with the other filters', async () => {
+    renderPage()
+    await screen.findByText('AST-000001')
+    await pickHolder('Asha Kumar')
+    choose(/Status/, 'Available')
+
+    expect(await screen.findByText('No matches')).toBeTruthy()
+    expect(listAssets.mock.calls.at(-1)[0]).toMatchObject({ assignedTo: 7, status: 'available' })
+  })
+
+  it('an inactive holder is marked in the column', async () => {
+    listAssets.mockResolvedValue(page([asset(5, { name: 'Old laptop', serial_number: 'X-1', status: 'assigned', assigned_to: OLD })]))
+    renderPage()
+    expect(await screen.findByText('Old Timer (EMP-009) (inactive)')).toBeTruthy()
   })
 })

@@ -142,6 +142,8 @@ def deactivate_employee(
 
     - The employee is linked to your own login: **409** `cannot_change_self`
     - The linked login is the last active Admin: **409** `last_admin`
+    - The employee still holds assets: **409** `employee_has_assets` (`details.assets` lists
+      them; Slice 5.1, owner's answer N6)
     """
     employee = service.get_employee(db, employee_id)
     return service.set_active(db, actor=user, employee=employee, active=False, context=context)

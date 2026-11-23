@@ -51,6 +51,42 @@ class AssetLink(BaseModel):
     serial_number: str
 
 
+class AssetEmployeeSummary(BaseModel):
+    """The employee holding an asset (Slice 5.1). Status shown because an inactive
+    employee may still hold one (A1)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    employee_code: str
+    full_name: str
+    status: str
+
+
+class AssetCurrentAssignment(BaseModel):
+    """Who holds the asset now (Slice 5.1, ASN-01 to ASN-04). Empty unless Assigned."""
+
+    id: int
+    employee: AssetEmployeeSummary
+    assignment_date: date
+    expected_return_date: date | None
+    assigned_by: AssetUserSummary
+    created_at: datetime = Field(description="When the assignment was saved (UTC).")
+
+
+class AssetAssign(BaseModel):
+    """Assign an Available asset to an active employee (Slice 5.1; owner's answers N1-N3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    employee_id: int = Field(ge=1, description="An active employee (a login is not needed).")
+    assignment_date: date | None = Field(
+        default=None, description="Today by default (company timezone); earlier allowed; not in the future; "
+        "not before the asset was created."
+    )
+    expected_return_date: date | None = Field(default=None, description="Optional; on or after the assignment date.")
+
+
 class AssetRead(BaseModel):
     """One asset. All times are UTC (ISO 8601 with offset); dates are plain dates."""
 
@@ -75,6 +111,9 @@ class AssetRead(BaseModel):
     retired_at: datetime | None = Field(default=None, description="When it was retired (Slice 4.2).")
     retired_by: AssetUserSummary | None = Field(default=None, description="Who retired it.")
     retire_reason: str | None = Field(default=None, description="Why it was retired (required when retiring).")
+    current_assignment: AssetCurrentAssignment | None = Field(
+        default=None, description="Who holds it now (Slice 5.1); empty unless Assigned."
+    )
 
 
 # INR, 2 decimals, 0 allowed, NUMERIC(12,2): the same format as a purchase line's unit cost (P2, B44).
@@ -145,6 +184,9 @@ class AssetListItem(BaseModel):
     location: str | None
     warranty_expiry: date | None
     created_at: datetime
+    assigned_to: AssetEmployeeSummary | None = Field(
+        default=None, description="The employee holding it now (Slice 5.1, A1); empty unless Assigned."
+    )
 
 
 class AssetPage(BaseModel):

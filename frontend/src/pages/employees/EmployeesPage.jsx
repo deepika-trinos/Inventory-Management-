@@ -3,15 +3,19 @@
 // add and edit them; deactivate (after a confirm box) or activate them.
 // There is no delete: employees are deactivated (BR-12). Deactivating also
 // deactivates a linked login (decision B21). The server enforces every rule again.
+// Slice 5.1 (owner's answer N6): an employee who still holds assets cannot be
+// deactivated; the box then lists the assets they hold, with links to them.
 import { useCallback, useEffect, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
-import { Box, Button, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { Link as RouterLink } from 'react-router'
+import { Alert, Box, Button, IconButton, Link, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
 
 import { listDepartments, listEmployees, setEmployeeActive } from '../../api/employees'
-import { getErrorMessage } from '../../api/errors'
+import { assetPath } from '../../api/assets'
+import { getErrorCode, getErrorMessage } from '../../api/errors'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import DataTable from '../../components/DataTable'
 import StatusBadge, { recordStatusLabel } from '../../components/StatusBadge'
@@ -42,7 +46,12 @@ export default function EmployeesPage() {
 
   // Which dialog is open: { type: 'create' | 'edit' | 'active', employee }
   const [dialog, setDialog] = useState(null)
-  const close = () => setDialog(null)
+  // Deactivation refused because they still hold assets (N6): { message, assets }.
+  const [heldAssets, setHeldAssets] = useState(null)
+  const close = () => {
+    setDialog(null)
+    setHeldAssets(null)
+  }
 
   // Department filter choices: refreshed after every save (a new one may have been typed).
   useEffect(() => {
@@ -66,6 +75,11 @@ export default function EmployeesPage() {
       close()
       reload()
     } catch (error) {
+      if (getErrorCode(error) === 'employee_has_assets') {
+        // Shown inside the box: the assets to return first (N6).
+        setHeldAssets({ message: getErrorMessage(error), assets: error.response.data.error.details?.assets ?? [] })
+        return
+      }
       notify.error(getErrorMessage(error)) // box stays open so they can try again
     }
   }
@@ -225,9 +239,26 @@ export default function EmployeesPage() {
         message={targetActive ? deactivateMessage : 'They can be chosen for new records again.'}
         confirmLabel={targetActive ? 'Deactivate' : 'Activate'}
         destructive={targetActive}
+        confirmDisabled={Boolean(heldAssets)}
         onCancel={close}
         onConfirm={toggleActive}
-      />
+      >
+        {heldAssets ? (
+          <Alert severity="error" sx={{ mt: 2 }} data-testid="employee-has-assets">
+            <Typography variant="body2">{heldAssets.message}</Typography>
+            <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>
+              {heldAssets.assets.map((asset) => (
+                <li key={asset.id}>
+                  <Link component={RouterLink} to={assetPath(asset)} underline="hover">
+                    {asset.asset_code}
+                  </Link>{' '}
+                  · {asset.name}
+                </li>
+              ))}
+            </Box>
+          </Alert>
+        ) : null}
+      </ConfirmDialog>
     </Stack>
   )
 }

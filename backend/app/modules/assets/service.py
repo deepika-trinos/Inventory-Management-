@@ -111,6 +111,7 @@ def list_assets(
     category_id: int | None = None,
     status: str | None = None,
     location: str | None = None,
+    assigned_to: int | None = None,
 ) -> dict[str, Any]:
     """The asset register (AST-03, AST-05): one sorted page of assets.
 
@@ -118,8 +119,13 @@ def list_assets(
     - `category_id`: one category (active or inactive). Unknown: 404 `category_not_found`.
     - `status`: one asset status (PRD 8.1).
     - `location`: the whole location, ignoring case (typed text, Q1; like department, B23).
+    - `assigned_to`: assets one employee (active or inactive) holds now (Slice 5.1, A1).
+      Unknown: 404 `employee_not_found`.
     All filters combine (every one must match).
     """
+    from app.modules.assignments.models import Assignment
+    from app.modules.employees.models import Employee
+
     stmt: Select = select(Asset).join(AssetCategory, Asset.category_id == AssetCategory.id)
     if search and search.strip():
         term = search.strip().lower()
@@ -135,6 +141,13 @@ def list_assets(
         stmt = stmt.where(Asset.status == status)
     if location and location.strip():
         stmt = stmt.where(func.lower(Asset.location) == location.strip().lower())
+    if assigned_to is not None:
+        if db.get(Employee, assigned_to) is None:
+            raise AppError(404, "employee_not_found", "Employee not found.")
+        holds = select(Assignment.id).where(
+            Assignment.asset_id == Asset.id, Assignment.employee_id == assigned_to, Assignment.returned_at.is_(None)
+        ).exists()
+        stmt = stmt.where(holds)
     return paginate(db, stmt, params, sortable=_SORTABLE, default_sort="-asset_code", tiebreaker=Asset.id)
 
 

@@ -5,7 +5,9 @@
 // Editing and retiring are on the asset page (Slice 4.2). Slice 4.5 (AST-01, A7): an
 // "Add existing asset" button enters equipment the company already owns, without a
 // purchase; after saving, the new asset's page opens.
-// The employee filter arrives with assignments in Slice 5.1 (owner's answer to A1).
+// Slice 5.1 (owner's answer A1): an "Assigned to" column (the current holder) and an
+// "Assigned to" filter listing active AND inactive employees (an inactive employee may
+// still hold an asset); it works with Clear filters and "No matches" like the others.
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import AddOutlined from '@mui/icons-material/AddOutlined'
@@ -14,6 +16,7 @@ import { Button, MenuItem, Stack, TextField, Typography } from '@mui/material'
 import { ASSET_STATUS_LABELS, assetPath, assetStatusLabel, listAssetLocations, listAssets } from '../../api/assets'
 import { listCategories } from '../../api/categories'
 import DataTable from '../../components/DataTable'
+import EmployeePicker from '../../components/EmployeePicker'
 import StatusBadge from '../../components/StatusBadge'
 import { useNotify } from '../../context/NotificationContext'
 import AssetCreateDialog from './AssetCreateDialog'
@@ -32,7 +35,13 @@ const COLUMNS = [
   { field: 'model', label: 'Model', sortable: true, render: (a) => [a.brand, a.model].filter(Boolean).join(' ') },
   { field: 'location', label: 'Location', sortable: true, render: (a) => a.location || dash },
   { field: 'status', label: 'Status', sortable: true, render: (a) => <StatusBadge status={assetStatusLabel(a.status)} /> },
+  { field: 'assigned_to', label: 'Assigned to', render: (a) => (a.assigned_to ? holderLabel(a.assigned_to) : dash) },
 ]
+
+/** "Asha Kumar (EMP-001)", marked when the employee is inactive. */
+export function holderLabel(employee) {
+  return `${employee.full_name} (${employee.employee_code})${employee.status !== 'active' ? ' (inactive)' : ''}`
+}
 
 export default function AssetsPage() {
   const navigate = useNavigate()
@@ -43,12 +52,14 @@ export default function AssetsPage() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [locationFilter, setLocationFilter] = useState('')
+  const [holderFilter, setHolderFilter] = useState(null) // an employee, or null (A1)
   // While any filter is set: a Clear filters button, and "No matches" for an empty result (D9).
-  const filtersActive = Boolean(categoryFilter || statusFilter || locationFilter)
+  const filtersActive = Boolean(categoryFilter || statusFilter || locationFilter || holderFilter)
   const clearFilters = () => {
     setCategoryFilter('')
     setStatusFilter('')
     setLocationFilter('')
+    setHolderFilter(null)
   }
 
   // Filter choices: one-by-one categories (active and inactive; first 100 by name, B53)
@@ -65,8 +76,15 @@ export default function AssetsPage() {
   }, [])
 
   const fetchRows = useCallback(
-    (args) => listAssets({ ...args, categoryId: categoryFilter, status: statusFilter, location: locationFilter }),
-    [categoryFilter, statusFilter, locationFilter],
+    (args) =>
+      listAssets({
+        ...args,
+        categoryId: categoryFilter,
+        status: statusFilter,
+        location: locationFilter,
+        assignedTo: holderFilter?.id,
+      }),
+    [categoryFilter, statusFilter, locationFilter, holderFilter],
   )
 
   const filters = (
@@ -117,6 +135,15 @@ export default function AssetsPage() {
           </MenuItem>
         ))}
       </TextField>
+      <EmployeePicker
+        label="Assigned to"
+        size="small"
+        value={holderFilter}
+        onChange={setHolderFilter}
+        onlyWithoutLogin={false}
+        includeInactive
+        sx={{ minWidth: 220 }}
+      />
       {filtersActive ? (
         <Button size="small" onClick={clearFilters}>
           Clear filters
