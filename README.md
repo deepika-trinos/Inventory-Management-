@@ -7,8 +7,8 @@ what we own, where it is, who has it, and what needs attention.
 - **Build plan:** [documentation/IT_Asset_Inventory_Build_Plan_Phases.docx](documentation/IT_Asset_Inventory_Build_Plan_Phases.docx)
 - **Decisions log:** [documentation/decisions.md](documentation/decisions.md)
 
-**Current state:** Phase 1 (Foundation) complete: login, roles, audit log, app shell and Admin
-user management. **Phase 2 (Master data) complete and signed off (2026-11-12):** asset
+**Current state:** **Phase 1 (Foundation) complete and signed off (2026-11-23):** login, roles,
+audit log, app shell and Admin user management. **Phase 2 (Master data) complete and signed off (2026-11-12):** asset
 categories (2.1), employees (2.2; every Employee-role login is linked to an employee record),
 vendors (2.3) and bulk stock items (2.4). See
 [documentation/Phase2_WrapUp.md](documentation/Phase2_WrapUp.md). **Phase 3 (Purchase and

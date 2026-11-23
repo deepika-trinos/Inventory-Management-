@@ -108,7 +108,7 @@ Not installed (not needed yet): `@testing-library/jest-dom` and `@testing-librar
 | Q12 | Hosting provider and domain | Slice 8.5 | Before Phase 8 starts |
 | R2 | **Temporary passwords:** must a user change the temporary password at first login? Is a "forgot / reset password" feature needed (the PRD has none)? Today the Admin hands over the password and the user keeps it. | Nothing in Phase 2; affects security review (Slice 8.3) | Before Slice 8.3 |
 
-**Slice 3.1 decisions B42–B54 are signed off (section 14). Slice 3.2 decisions B55–B66 are signed off (section 15). Slice 3.3 decisions C1–C12 are signed off (section 16). Slice 3.4 decisions D1–D10 are signed off (section 17). ✅ Phase 3 (Purchase and receiving) signed off by the owner on 2026-11-20, after all 18 manual test steps passed (`Phase3_WrapUp.md`). Slice 4.1 decisions E1–E10 are signed off (section 18, 2026-11-20); A1 is answered (E1); A2–A3 are answered (section 19, 2026-11-22); A4–A5 are answered (section 22, 2026-11-23); A6–A7 are still to be answered before Slice 4.5. Slice 4.2 decisions F1–F8 are signed off (section 20, 2026-11-22). Slice 4.3 decisions G1–G6 are signed off (section 21, 2026-11-23).** R1 is decided (see section 8). R3 is decided (see section 10). T1 is approved (see section 3). P1–P8 are decided (see section 13). Nothing OPEN blocks Phase 3.**
+**Phase 1 (Slices 1.1–1.6, decisions B1–B12) is signed off (section 8, 2026-11-23). Slice 3.1 decisions B42–B54 are signed off (section 14). Slice 3.2 decisions B55–B66 are signed off (section 15). Slice 3.3 decisions C1–C12 are signed off (section 16). Slice 3.4 decisions D1–D10 are signed off (section 17). ✅ Phase 3 (Purchase and receiving) signed off by the owner on 2026-11-20, after all 18 manual test steps passed (`Phase3_WrapUp.md`). Slice 4.1 decisions E1–E10 are signed off (section 18, 2026-11-20); A1 is answered (E1); A2–A3 are answered (section 19, 2026-11-22); A4–A5 are answered (section 22, 2026-11-23); A6–A7 are still to be answered before Slice 4.5. Slice 4.2 decisions F1–F8 are signed off (section 20, 2026-11-22). Slice 4.3 decisions G1–G6 are signed off (section 21, 2026-11-23).** R1 is decided (see section 8). R3 is decided (see section 10). T1 is approved (see section 3). P1–P8 are decided (see section 13). Nothing OPEN blocks Phase 3.**
 
 ---
 
@@ -138,7 +138,12 @@ Not installed (not needed yet): `@testing-library/jest-dom` and `@testing-librar
 
 ---
 
-## 8. Decisions in Slices 1.5–1.6 (pending the owner's sign-off of those slices)
+## 8. Decisions in Slices 1.5–1.6 (✅ signed off with Phase 1 by the owner, 2026-11-23)
+
+**✅ Phase 1 (Foundation) signed off by the owner on 2026-11-23** (Slices 1.1–1.6, decisions B1–B12,
+R1, order fixes a–c). Phase 1 was completed on 2026-11-11 (commit `976317c`) and has been in use
+since; this sign-off was recorded afterwards, when a progress review found that no Phase 1 sign-off
+entry existed. B7–B12 are approved with it.
 
 | # | Decision | Why | Date | Slice |
 |---|---|---|---|---|
