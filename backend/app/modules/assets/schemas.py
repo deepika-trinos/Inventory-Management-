@@ -72,6 +72,7 @@ class AssetCurrentAssignment(BaseModel):
     expected_return_date: date | None
     assigned_by: AssetUserSummary
     created_at: datetime = Field(description="When the assignment was saved (UTC).")
+    is_overdue: bool = Field(default=False, description="Expected return date before today and not returned (Slice 5.3, N7).")
 
 
 class AssetAssign(BaseModel):

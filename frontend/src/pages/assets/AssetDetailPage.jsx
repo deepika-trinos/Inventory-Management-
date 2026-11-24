@@ -297,7 +297,12 @@ export default function AssetDetailPage() {
             <Detail
               label="Expected return"
               testId="asset-expected-return"
-              value={holder.expected_return_date ? formatPlainDate(holder.expected_return_date) : 'Not set'}
+              value={
+                <>
+                  {holder.expected_return_date ? formatPlainDate(holder.expected_return_date) : 'Not set'}{' '}
+                  {holder.is_overdue ? <Chip size="small" color="error" label="Overdue" data-testid="asset-overdue" /> : null}
+                </>
+              }
             />
             <Detail label="Assigned by" value={`${holder.assigned_by.email} · ${formatDateTime(holder.created_at)}`} />
           </Box>

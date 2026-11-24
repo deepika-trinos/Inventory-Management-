@@ -1,6 +1,7 @@
 """Assignments: giving an Available asset to an active employee (Slice 5.1: ASN-01 to
 ASN-04, EMP-05, BR-02, BR-03, BR-05, BR-11; owner's answers N1, N2, N3, N6, N9, A1), and
-returning it with its inspection (Slice 5.2: ASN-05, ASN-06, BR-04, BR-13; Q5, N4, N5).
+returning it with its inspection (Slice 5.2: ASN-05, ASN-06, BR-04, BR-13; Q5, N4, N5), and
+reading the history and overdue returns (Slice 5.3: ASN-07, ASN-08, EMP-04; N7, N8, N10-N13).
 
 RULES
 - Only an AVAILABLE asset can be assigned. Assigned, Under Maintenance, Damaged and
@@ -333,6 +334,117 @@ def return_asset(
     return assignment
 
 
+# ---- History and overdue (Slice 5.3: ASN-07, ASN-08, EMP-04; owner's answers N7, N8, N10-N13) ----
+def days_overdue(assignment: Assignment, today: date | None = None) -> int:
+    """N7: how many days past the expected return date an OPEN assignment is (0 = not overdue).
+    Overdue = expected return date before today (company timezone) and not returned. Due today
+    is not overdue yet; no expected return date is never overdue; a returned one is never overdue."""
+    if assignment.returned_at is not None or assignment.expected_return_date is None:
+        return 0
+    today = today or _today()
+    return max((today - assignment.expected_return_date).days, 0)
+
+
+def employee_assignments(db: Session, employee_id: int) -> dict[str, list[Assignment]]:
+    """EMP-04: what the employee holds now and what they held before (ASN-07). Current: by
+    assignment date, oldest first. Past: newest return first. Works for inactive employees."""
+    rows = list(
+        db.scalars(
+            select(Assignment)
+            .where(Assignment.employee_id == employee_id)
+            .order_by(Assignment.assignment_date, Assignment.id)
+        ).unique()
+    )
+    current = [a for a in rows if a.returned_at is None]
+    past = sorted(
+        (a for a in rows if a.returned_at is not None),
+        key=lambda a: (a.return_date, a.returned_at, a.id),
+        reverse=True,
+    )
+    return {"current": current, "past": past}
+
+
+_OVERDUE_SORTABLE = {
+    "expected_return_date": Assignment.expected_return_date,
+    "assignment_date": Assignment.assignment_date,
+    "asset_code": Asset.asset_code,
+    "employee": func.lower(Employee.full_name),
+}
+
+
+def list_overdue(db: Session, params, *, search: str | None = None) -> dict[str, Any]:
+    """ASN-08, N7, N10: every overdue assignment, most late first (oldest expected return date),
+    paged. `search` matches part of the asset ID, asset name, serial number, employee ID or
+    employee name, ignoring case."""
+    from app.core.pagination import paginate
+
+    stmt = (
+        select(Assignment)
+        .join(Asset, Assignment.asset_id == Asset.id)
+        .join(Employee, Assignment.employee_id == Employee.id)
+        .where(
+            Assignment.returned_at.is_(None),
+            Assignment.expected_return_date.is_not(None),
+            Assignment.expected_return_date < _today(),
+        )
+    )
+    if search and search.strip():
+        term = search.strip().lower()
+        stmt = stmt.where(
+            func.lower(Asset.asset_code).contains(term, autoescape=True)
+            | func.lower(Asset.name).contains(term, autoescape=True)
+            | func.lower(Asset.serial_number).contains(term, autoescape=True)
+            | func.lower(Employee.employee_code).contains(term, autoescape=True)
+            | func.lower(Employee.full_name).contains(term, autoescape=True)
+        )
+    return paginate(
+        db, stmt, params, sortable=_OVERDUE_SORTABLE, default_sort="expected_return_date", tiebreaker=Assignment.id
+    )
+
+
+def employee_of_login(db: Session, user: User) -> Employee:
+    """N8: the employee record linked to this login (every Employee-role login has one, order fix b)."""
+    employee = db.get(Employee, user.employee_id) if user.employee_id is not None else None
+    if employee is None:
+        raise AppError(404, "employee_not_linked", "Your login is not linked to an employee record. Ask an Admin.")
+    return employee
+
+
+def read(assignment: Assignment, *, for_employee: bool = False, today: date | None = None) -> dict[str, Any]:
+    """One assignment as the history and overdue responses show it. `for_employee` leaves out the
+    condition notes and the staff who assigned or returned it (N12)."""
+    asset = assignment.asset
+    employee = assignment.employee
+    late = days_overdue(assignment, today)
+    data: dict[str, Any] = {
+        "id": assignment.id,
+        "asset": {
+            "id": asset.id, "asset_code": asset.asset_code, "name": asset.name,
+            "serial_number": asset.serial_number, "status": asset.status,
+        },
+        "employee": {
+            "id": employee.id, "employee_code": employee.employee_code,
+            "full_name": employee.full_name, "status": employee.status,
+        },
+        "assignment_date": assignment.assignment_date,
+        "expected_return_date": assignment.expected_return_date,
+        "return_date": assignment.return_date,
+        "return_outcome": assignment.return_outcome,
+        "is_open": assignment.returned_at is None,
+        "is_overdue": late > 0,
+        "days_overdue": late,
+    }
+    if not for_employee:
+        data.update(
+            assigned_by=assignment.assigned_by,
+            created_at=assignment.created_at,
+            condition_notes=assignment.condition_notes,
+            returned_by=assignment.returned_by,
+            returned_at=assignment.returned_at,
+        )
+    return data
+
+
 # ---- Response helpers -----------------------------------------------------------------------
 def summary(assignment: Assignment | None) -> dict[str, Any] | None:
     """The current assignment as the asset responses show it."""
@@ -351,4 +463,5 @@ def summary(assignment: Assignment | None) -> dict[str, Any] | None:
         "expected_return_date": assignment.expected_return_date,
         "assigned_by": assignment.assigned_by,
         "created_at": assignment.created_at,
+        "is_overdue": days_overdue(assignment) > 0,  # Slice 5.3, N7
     }

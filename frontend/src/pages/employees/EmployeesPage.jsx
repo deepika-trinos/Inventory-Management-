@@ -5,6 +5,7 @@
 // deactivates a linked login (decision B21). The server enforces every rule again.
 // Slice 5.1 (owner's answer N6): an employee who still holds assets cannot be
 // deactivated; the box then lists the assets they hold, with links to them.
+// Slice 5.3 (EMP-04): the name opens the employee page /employees/:id (current assets and history).
 import { useCallback, useEffect, useState } from 'react'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
@@ -92,7 +93,9 @@ export default function EmployeesPage() {
       sortable: true,
       render: (e) => (
         <Box>
-          <Typography variant="body2">{e.full_name}</Typography>
+          <Link component={RouterLink} to={`/employees/${e.id}`} underline="hover" variant="body2">
+            {e.full_name}
+          </Link>
           {e.work_email ? (
             <Typography variant="caption" color="text.secondary">
               {e.work_email}

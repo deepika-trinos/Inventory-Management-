@@ -38,14 +38,14 @@ export const PAGES = [
   { path: '/vendors', label: 'Vendors', icon: StorefrontOutlined, roles: STAFF, slice: 'Slice 2.3' },
   { path: '/purchases', label: 'Purchases', icon: ShoppingCartOutlined, roles: STAFF, slice: 'Slice 3.1' },
   { path: '/employees', label: 'Employees', icon: BadgeOutlined, roles: STAFF, slice: 'Slice 2.2' },
-  { path: '/assignments', label: 'Assignments', icon: AssignmentIndOutlined, roles: STAFF, slice: 'Phase 5' },
+  { path: '/assignments', label: 'Assignments', icon: AssignmentIndOutlined, roles: STAFF, slice: 'Slice 5.3' },
   { path: '/maintenance', label: 'Maintenance', icon: BuildOutlined, roles: STAFF, slice: 'Phase 6' },
   { path: '/reports', label: 'Reports', icon: SummarizeOutlined, roles: STAFF, slice: 'Phase 7' },
   { path: '/users', label: 'Users', icon: ManageAccountsOutlined, roles: ADMIN_ONLY, slice: 'Slice 1.6' },
   { path: '/audit-log', label: 'Audit Log', icon: HistoryOutlined, roles: ADMIN_ONLY, slice: 'Slice 8.1' },
 
   { path: '/my/dashboard', label: 'My Dashboard', icon: DashboardOutlined, roles: EMPLOYEE_ONLY, slice: 'Slice 6.4' },
-  { path: '/my/assets', label: 'My Assets', icon: LaptopOutlined, roles: EMPLOYEE_ONLY, slice: 'Slice 6.4' },
+  { path: '/my/assets', label: 'My Assets', icon: LaptopOutlined, roles: EMPLOYEE_ONLY, slice: 'Slice 5.3' },
   { path: '/my/requests', label: 'My Requests', icon: ReportProblemOutlined, roles: EMPLOYEE_ONLY, slice: 'Slice 6.4' },
 ]
 
@@ -58,7 +58,8 @@ export function canOpen(role, path) {
   return Boolean(page && page.roles.includes(role))
 }
 
-// Where each role lands after logging in.
+// Where each role lands after logging in. Employees land on My Assets until Slice 6.4 builds
+// My Dashboard (owner's answer N11).
 export function homePathFor(role) {
-  return role === ROLES.EMPLOYEE ? '/my/dashboard' : '/dashboard'
+  return role === ROLES.EMPLOYEE ? '/my/assets' : '/dashboard'
 }

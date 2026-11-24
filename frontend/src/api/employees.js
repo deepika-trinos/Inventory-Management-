@@ -42,3 +42,9 @@ export async function setEmployeeActive(id, active) {
 export function employeeLabel(employee) {
   return employee ? `${employee.employee_code} · ${employee.full_name}` : ''
 }
+
+// One employee by id (Slice 5.3: the employee page).
+export async function getEmployee(id) {
+  const { data } = await apiClient.get(`${BASE}/${id}`)
+  return data
+}

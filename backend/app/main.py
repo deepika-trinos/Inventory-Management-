@@ -12,6 +12,8 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.modules.admin.routes import router as admin_router
 from app.modules.assets.routes import router as assets_router
+from app.modules.assignments.routes import me_router as my_assignments_router
+from app.modules.assignments.routes import router as assignments_router
 from app.modules.auth.routes import router as auth_router
 from app.modules.categories.routes import router as categories_router
 from app.modules.employees.routes import router as employees_router
@@ -79,4 +81,6 @@ api_router.include_router(vendors_router)
 api_router.include_router(inventory_router)
 api_router.include_router(purchases_router)
 api_router.include_router(assets_router)
+api_router.include_router(assignments_router)
+api_router.include_router(my_assignments_router)
 app.include_router(api_router)

@@ -16,6 +16,7 @@ from app.modules.audit.service import AuditContext, get_audit_context
 from app.modules.auth.dependencies import require_roles
 from app.modules.employees import service
 from app.modules.employees.models import Employee
+from app.modules.assignments.schemas import EmployeeAssignments
 from app.modules.employees.schemas import (
     EmployeeCreate,
     EmployeePage,
@@ -85,6 +86,25 @@ def create_employee(
 )
 def get_employee(employee_id: int, db: Session = Depends(get_db)) -> Employee:
     return service.get_employee(db, employee_id)
+
+
+@router.get(
+    "/{employee_id}/assignments", response_model=EmployeeAssignments,
+    summary="An employee's current assets and assignment history", responses=error_responses(404),
+)
+def employee_assignments(employee_id: int, db: Session = Depends(get_db)) -> dict:
+    """EMP-04, ASN-07 (Slice 5.3): what the employee holds now (with the overdue flag, N7) and
+    every past assignment with its return details, newest return first. Inactive employees too.
+    Unknown employee: **404** `employee_not_found`."""
+    from app.modules.assignments import service as assignments_service
+
+    employee = service.get_employee(db, employee_id)
+    held = assignments_service.employee_assignments(db, employee.id)
+    return {
+        "employee": employee,
+        "current": [assignments_service.read(a) for a in held["current"]],
+        "past": [assignments_service.read(a) for a in held["past"]],
+    }
 
 
 @router.patch(

@@ -16,9 +16,12 @@ import LoginPage from '../pages/LoginPage'
 import NotFoundPage from '../pages/NotFoundPage'
 import AssetDetailPage from '../pages/assets/AssetDetailPage'
 import AssetsPage from '../pages/assets/AssetsPage'
+import AssignmentsPage from '../pages/assignments/AssignmentsPage'
 import CategoriesPage from '../pages/categories/CategoriesPage'
+import EmployeeDetailPage from '../pages/employees/EmployeeDetailPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
+import MyAssetsPage from '../pages/my/MyAssetsPage'
 import StockItemDetailPage from '../pages/inventory/StockItemDetailPage'
 import PurchaseDetailPage from '../pages/purchases/PurchaseDetailPage'
 import PurchasesPage from '../pages/purchases/PurchasesPage'
@@ -37,9 +40,11 @@ const ComponentGalleryPage = import.meta.env.DEV
 // Pages that are built. Every other page in PAGES shows "Coming soon".
 const BUILT_PAGES = {
   '/assets': AssetsPage,
+  '/assignments': AssignmentsPage, // Slice 5.3: overdue returns (N10)
   '/categories': CategoriesPage,
   '/employees': EmployeesPage,
   '/inventory': InventoryPage,
+  '/my/assets': MyAssetsPage, // Slice 5.3 (N8, N15)
   '/purchases': PurchasesPage,
   '/users': UsersPage,
   '/vendors': VendorsPage,
@@ -51,6 +56,7 @@ const DETAIL_PAGES = [
   { path: '/purchases/:purchaseId', parent: '/purchases', Page: PurchaseDetailPage }, // Slice 3.4
   { path: '/assets/:assetId', parent: '/assets', Page: AssetDetailPage }, // Slice 4.1
   { path: '/inventory/:itemId', parent: '/inventory', Page: StockItemDetailPage }, // Slice 4.3
+  { path: '/employees/:employeeId', parent: '/employees', Page: EmployeeDetailPage }, // Slice 5.3
 ]
 
 function HomeRedirect() {
