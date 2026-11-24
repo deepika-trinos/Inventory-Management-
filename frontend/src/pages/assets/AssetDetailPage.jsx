@@ -14,9 +14,13 @@
 // Slice 5.1 (ASN-01 to ASN-04): an "Assign…" button (only for Available assets; greyed
 // out with the reason otherwise) opening a form and a confirm box; an "Assigned to"
 // section with the current holder; history shows "Assigned to Asha Kumar (EMP-001)".
+// Slice 5.2 (ASN-05, ASN-06, BR-04): a "Return…" button (only while Assigned) opening one
+// form for the return and the inspection (Q5, N4), then a confirm box; afterwards the page
+// shows the new status and no holder; history shows "Returned by Asha Kumar — Damaged: …".
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
+import AssignmentReturnOutlined from '@mui/icons-material/AssignmentReturnOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import PersonAddAltOutlined from '@mui/icons-material/PersonAddAltOutlined'
@@ -42,6 +46,7 @@ import { useNotify } from '../../context/NotificationContext'
 import AssetAssignDialog, { employeeName } from './AssetAssignDialog'
 import AssetEditDialog from './AssetEditDialog'
 import AssetRetireDialog from './AssetRetireDialog'
+import AssetReturnDialog from './AssetReturnDialog'
 
 function Detail({ label, value, testId }) {
   return (
@@ -97,6 +102,12 @@ export function historyNote(entry) {
   if (entry.action === 'asset.created') {
     return after.purchase_number ? `Received on purchase ${after.purchase_number}` : 'Entered by hand'
   }
+  if (entry.action === 'assignment.returned') {
+    // e.g. "Returned by Asha Kumar — Damaged: screen cracked"
+    const who = after.employee_name ?? 'an employee'
+    const outcome = assetStatusLabel(after.inspection_outcome ?? after.status)
+    return `Returned by ${who} — ${outcome}${after.condition_notes ? `: ${after.condition_notes}` : ''}`
+  }
   if (entry.action === 'assignment.created') {
     // e.g. "Assigned to Asha Kumar (EMP-001) · from 23 Nov 2026 · expected back 23 Dec 2026"
     const who = after.employee_name ? `${after.employee_name} (${after.employee_code})` : 'an employee'
@@ -147,7 +158,7 @@ export default function AssetDetailPage() {
   const [asset, setAsset] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign'
+  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign' | 'return'
   const [historyKey, setHistoryKey] = useState(0)
   const notify = useNotify()
 
@@ -233,6 +244,11 @@ export default function AssetDetailPage() {
                 </Button>
               </span>
             </Tooltip>
+            {holder ? (
+              <Button variant="contained" startIcon={<AssignmentReturnOutlined />} onClick={() => setDialog('return')}>
+                Return…
+              </Button>
+            ) : null}
             <Button variant="outlined" startIcon={<EditOutlined />} onClick={() => setDialog('edit')}>
               Edit
             </Button>
@@ -335,6 +351,15 @@ export default function AssetDetailPage() {
           asset={a}
           onClose={() => setDialog(null)}
           onSaved={(saved) => afterChange(saved, `${saved.asset_code} saved.`)}
+        />
+      ) : null}
+
+      {dialog === 'return' ? (
+        <AssetReturnDialog
+          open
+          asset={a}
+          onClose={() => setDialog(null)}
+          onReturned={(saved) => afterChange(saved, `${saved.asset_code} returned. Status: ${assetStatusLabel(saved.status)}.`)}
         />
       ) : null}
 

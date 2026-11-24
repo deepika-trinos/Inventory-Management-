@@ -1,5 +1,6 @@
 """Assignments: giving an Available asset to an active employee (Slice 5.1: ASN-01 to
-ASN-04, EMP-05, BR-02, BR-03, BR-05, BR-11; owner's answers N1, N2, N3, N6, N9, A1).
+ASN-04, EMP-05, BR-02, BR-03, BR-05, BR-11; owner's answers N1, N2, N3, N6, N9, A1), and
+returning it with its inspection (Slice 5.2: ASN-05, ASN-06, BR-04, BR-13; Q5, N4, N5).
 
 RULES
 - Only an AVAILABLE asset can be assigned. Assigned, Under Maintenance, Damaged and
@@ -23,7 +24,7 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -31,7 +32,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.modules.assets import service as assets_service
 from app.modules.assets.models import Asset, AssetStatus
-from app.modules.assignments.models import Assignment
+from app.modules.assignments.models import CONDITION_NOTES_MAX_LENGTH, Assignment, ReturnOutcome
 from app.modules.audit import service as audit
 from app.modules.audit.actions import AuditAction
 from app.modules.audit.service import AuditContext
@@ -201,6 +202,130 @@ def assign_asset(
                 {"status": AssetStatus.ASSIGNED},
             ) from None
         raise
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(assignment)
+    return assignment
+
+
+# ---- Returning (Slice 5.2: ASN-05, ASN-06, BR-04, BR-13; owner's answers Q5, N4, N5, N9) ----------
+_OUTCOME_LABELS = {
+    ReturnOutcome.AVAILABLE: "Available",
+    ReturnOutcome.UNDER_MAINTENANCE: "Under Maintenance",
+    ReturnOutcome.DAMAGED: "Damaged",
+}
+
+
+def _lock_open_assignment(db: Session, asset: Asset) -> Assignment:
+    """The asset's open assignment, row-locked. The asset row is already locked, so a
+    second return at the same moment waits and then finds the asset no longer Assigned."""
+    assignment = db.scalar(
+        select(Assignment)
+        .where(Assignment.asset_id == asset.id, Assignment.returned_at.is_(None))
+        .with_for_update(of=Assignment)
+        .execution_options(populate_existing=True)
+    )
+    if asset.status != AssetStatus.ASSIGNED or assignment is None:
+        raise AppError(
+            409, "asset_not_assigned",
+            f"{asset.asset_code} is not assigned to anyone, so it cannot be returned.",
+            {"status": asset.status},
+        )
+    return assignment
+
+
+def _return_date(value: date | None, assignment: Assignment) -> date:
+    """N4: today by default; earlier allowed; never in the future; not before the assignment date."""
+    today = _today()
+    if value is None:
+        value = today
+    if value > today:
+        raise AppError(422, "return_date_in_future", "The return date cannot be in the future.")
+    if value < assignment.assignment_date:
+        raise AppError(
+            422, "return_date_before_assignment",
+            f"The return date cannot be before the assignment date ({assignment.assignment_date.isoformat()}).",
+            {"assignment_date": assignment.assignment_date.isoformat()},
+        )
+    return value
+
+
+def _outcome(value: str | None) -> str:
+    """N4: required; Available, Under Maintenance or Damaged."""
+    if value not in ReturnOutcome.ALL:
+        raise AppError(
+            422, "invalid_inspection_outcome",
+            "Please choose the inspection outcome: Available, Under Maintenance or Damaged.",
+        )
+    return value
+
+
+def _condition_notes(value: str | None, outcome: str) -> str | None:
+    """N4: up to 1,000 characters; optional for Available, required for Damaged or Under Maintenance."""
+    notes = (value or "").strip() or None
+    if notes is None and outcome != ReturnOutcome.AVAILABLE:
+        raise AppError(
+            422, "condition_notes_required",
+            f"Please describe the condition: notes are required when the outcome is {_OUTCOME_LABELS[outcome]}.",
+        )
+    if notes is not None and len(notes) > CONDITION_NOTES_MAX_LENGTH:
+        raise AppError(
+            422, "invalid_condition_notes",
+            f"The condition notes can be at most {CONDITION_NOTES_MAX_LENGTH:,} characters.",
+        )
+    return notes
+
+
+def return_asset(
+    db: Session,
+    *,
+    actor: User,
+    asset: Asset,
+    inspection_outcome: str | None,
+    return_date: date | None = None,
+    condition_notes: str | None = None,
+    context: AuditContext | None = None,
+) -> Assignment:
+    """Record the return and the inspection on the same form (ASN-05, ASN-06, BR-04, Q5).
+    Closes the open assignment (kept, never overwritten, ASN-07) and sets the asset's status
+    from the outcome. Under Maintenance sets the status only; no maintenance request (N5).
+    One transaction with audit assignment.returned; a failure saves nothing.
+
+    Errors: 409 `asset_not_assigned`; 422 `invalid_inspection_outcome`,
+    `condition_notes_required`, `invalid_condition_notes`, `return_date_in_future`,
+    `return_date_before_assignment`."""
+    try:
+        asset = assets_service._lock(db, asset)  # the second of two simultaneous returns waits here
+        assignment = _lock_open_assignment(db, asset)
+        outcome = _outcome(inspection_outcome)
+        notes = _condition_notes(condition_notes, outcome)
+        on = _return_date(return_date, assignment)
+
+        assignment.return_date = on
+        assignment.return_outcome = outcome
+        assignment.condition_notes = notes
+        assignment.returned_at = func.now()  # database time, like the audit row
+        assignment.returned_by_user_id = actor.id
+        asset.status = outcome
+        employee = assignment.employee
+        audit.record(
+            db, actor=actor, action=AuditAction.ASSIGNMENT_RETURNED, entity=asset,
+            before={"status": AssetStatus.ASSIGNED},
+            after={
+                "status": outcome,
+                "assignment_id": assignment.id,
+                "employee_id": employee.id,
+                "employee_code": employee.employee_code,
+                "employee_name": employee.full_name,
+                "assignment_date": assignment.assignment_date,
+                "return_date": on,
+                "inspection_outcome": outcome,
+                "condition_notes": notes,
+            },
+            context=context,
+        )
+        db.commit()
     except Exception:
         db.rollback()
         raise

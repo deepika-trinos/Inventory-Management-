@@ -2,7 +2,7 @@
 // Slice 3.2: get one asset. Slice 4.1: the asset register (list, search, filters),
 // the locations in use, and an asset's history. Slice 4.2: edit and retire.
 // Slice 4.5: enter an existing asset by hand (no purchase). Slice 5.1: assign to an
-// employee; the register's "Assigned to" filter.
+// employee; the register's "Assigned to" filter. Slice 5.2: return with inspection.
 import apiClient from './client'
 
 const BASE = '/api/v1/assets'
@@ -107,6 +107,19 @@ export async function assignAsset(ref, { employeeId, assignmentDate, expectedRet
   return data
 }
 
+// Inspection outcomes on return (Slice 5.2, N4): the asset's next status.
+export const RETURN_OUTCOMES = ['available', 'under_maintenance', 'damaged']
+
+// Return an assigned asset with its inspection (Slice 5.2; owner's answers Q5, N4, N5).
+// { returnDate, outcome, notes? } -> the asset (new status, no current_assignment).
+export async function returnAsset(ref, { returnDate, outcome, notes }) {
+  const body = { inspection_outcome: outcome }
+  if (returnDate) body.return_date = returnDate
+  if (notes) body.condition_notes = notes
+  const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(ref)}/return`, body)
+  return data
+}
+
 // The asset's history (its audit log entries), newest first: { items, total, page, page_size }.
 export async function getAssetHistory(ref, { page = 1, pageSize = 20, sort } = {}) {
   const params = { page, page_size: pageSize }
@@ -122,6 +135,7 @@ const HISTORY_ACTION_LABELS = {
   'asset.updated': 'Edited',
   'asset.retired': 'Retired',
   'assignment.created': 'Assigned',
+  'assignment.returned': 'Returned',
 }
 
 export function historyActionLabel(action) {

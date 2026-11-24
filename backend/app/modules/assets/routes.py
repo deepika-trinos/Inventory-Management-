@@ -5,8 +5,8 @@ assets on "My Assets", Slice 6.4.)
 
 The asset register (list with search and filters), the locations in use, one
 asset and its history (Slice 4.1); editing the allowed details and retiring
-(Slice 4.2); assigning to an employee (Slice 5.1). There is deliberately NO
-delete endpoint (BR-12).
+(Slice 4.2); assigning to an employee (Slice 5.1) and returning it (Slice 5.2).
+There is deliberately NO delete endpoint (BR-12).
 """
 
 from fastapi import APIRouter, Depends, Path, Query, status
@@ -28,6 +28,7 @@ from app.modules.assets.schemas import (
     AssetPurchaseSummary,
     AssetRead,
     AssetRetire,
+    AssetReturn,
     AssetStatusField,
     AssetUpdate,
 )
@@ -230,5 +231,37 @@ def assign_asset(
     assignments_service.assign_asset(
         db, actor=user, asset=asset, employee_id=body.employee_id,
         assignment_date=body.assignment_date, expected_return_date=body.expected_return_date, context=context,
+    )
+    return _read(service.get_asset(db, asset.id), db)
+
+
+@router.post(
+    "/{asset_ref}/return", response_model=AssetRead, summary="Return an asset (with inspection)",
+    responses=error_responses(404, 409, 422),
+)
+def return_asset(
+    body: AssetReturn,
+    asset_ref: str = AssetRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> AssetRead:
+    """Record the return and the inspection on the same form (Slice 5.2: ASN-05, ASN-06,
+    BR-04; owner's answers Q5, N4, N5, N9). Closes the open assignment (kept with its return
+    details) and sets the asset's status from the outcome. Under Maintenance sets the
+    status only: no maintenance request is created (N5). One transaction with audit
+    `assignment.returned`; a failure saves nothing.
+
+    - Asset not assigned: **409** `asset_not_assigned` (`details.status`)
+    - Outcome missing or unknown: **422** `invalid_inspection_outcome`
+    - Notes missing for Under Maintenance or Damaged: **422** `condition_notes_required`;
+      over 1,000 characters: **422** `invalid_condition_notes`
+    - Return date in the future: **422** `return_date_in_future`; before the assignment
+      date: **422** `return_date_before_assignment`
+    - Returns the asset with its new status and no `current_assignment`."""
+    asset = service.get_asset(db, asset_ref)
+    assignments_service.return_asset(
+        db, actor=user, asset=asset, inspection_outcome=body.inspection_outcome,
+        return_date=body.return_date, condition_notes=body.condition_notes, context=context,
     )
     return _read(service.get_asset(db, asset.id), db)

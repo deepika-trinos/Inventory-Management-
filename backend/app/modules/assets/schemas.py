@@ -87,6 +87,24 @@ class AssetAssign(BaseModel):
     expected_return_date: date | None = Field(default=None, description="Optional; on or after the assignment date.")
 
 
+class AssetReturn(BaseModel):
+    """Return an assigned asset with its inspection, on one form (Slice 5.2; owner's answers Q5, N4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    return_date: date | None = Field(
+        default=None, description="Today by default (company timezone); earlier allowed; not in the future; "
+        "not before the assignment date."
+    )
+    inspection_outcome: str | None = Field(
+        default=None, max_length=50, description='Required: "available", "under_maintenance" or "damaged".'
+    )
+    condition_notes: str | None = Field(
+        default=None, max_length=5000,
+        description="Up to 1,000 characters; required when the outcome is Under Maintenance or Damaged.",
+    )
+
+
 class AssetRead(BaseModel):
     """One asset. All times are UTC (ISO 8601 with offset); dates are plain dates."""
 
