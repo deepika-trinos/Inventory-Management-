@@ -22,6 +22,7 @@ import EmployeeDetailPage from '../pages/employees/EmployeeDetailPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
 import MaintenancePage from '../pages/maintenance/MaintenancePage'
+import MaintenanceRequestPage from '../pages/maintenance/MaintenanceRequestPage'
 import MyAssetsPage from '../pages/my/MyAssetsPage'
 import StockItemDetailPage from '../pages/inventory/StockItemDetailPage'
 import PurchaseDetailPage from '../pages/purchases/PurchaseDetailPage'
@@ -59,6 +60,7 @@ const DETAIL_PAGES = [
   { path: '/assets/:assetId', parent: '/assets', Page: AssetDetailPage }, // Slice 4.1
   { path: '/inventory/:itemId', parent: '/inventory', Page: StockItemDetailPage }, // Slice 4.3
   { path: '/employees/:employeeId', parent: '/employees', Page: EmployeeDetailPage }, // Slice 5.3
+  { path: '/maintenance/:requestRef', parent: '/maintenance', Page: MaintenanceRequestPage }, // Slice 6.2
 ]
 
 function HomeRedirect() {

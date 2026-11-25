@@ -62,6 +62,7 @@ class AuditAction:
     # Maintenance
     MAINTENANCE_REPORTED = "maintenance.reported"  # Slice 6.1 (report a problem, O14)
     MAINTENANCE_STATUS_CHANGED = "maintenance.status_changed"  # Slices 6.2-6.3
+    MAINTENANCE_UPDATED = "maintenance.updated"  # Slice 6.2 (priority / details edited, U6)
 
     @classmethod
     def all(cls) -> frozenset[str]:

@@ -22,6 +22,9 @@
 // issue, optional priority and reported date (no confirm box, O10). The asset keeps its status
 // (Q9). A "Maintenance requests" section lists the asset's requests; history shows
 // "Problem reported · MNT-000001 · High · Screen flickers".
+// Slice 6.2 (MNT-04 to MNT-07; S13, S14): request numbers link to the request page; History shows
+// "Work started", "Repair completed", "Request cancelled" and "Request edited" rows; Retire… is greyed
+// out while a request is open ("Cancel or finish MNT-… first.").
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
@@ -57,7 +60,7 @@ import {
   RETIRABLE_STATUSES,
 } from '../../api/assets'
 import { getErrorCode } from '../../api/errors'
-import { getAssetRequests, maintenanceStatusLabel, priorityLabel, reporterLabel } from '../../api/maintenance'
+import { getAssetRequests, isOpenStatus, maintenanceStatusLabel, priorityLabel, reporterLabel, requestPath } from '../../api/maintenance'
 import DataTable from '../../components/DataTable'
 import EmptyState from '../../components/EmptyState'
 import ErrorMessage from '../../components/ErrorMessage'
@@ -70,6 +73,7 @@ import AssetAssignDialog, { employeeName } from './AssetAssignDialog'
 import AssetEditDialog from './AssetEditDialog'
 import AssetRetireDialog from './AssetRetireDialog'
 import AssetReturnDialog from './AssetReturnDialog'
+import { maintenanceActionLabel, maintenanceHistoryNote } from '../maintenance/maintenanceHistory'
 import ReportProblemDialog from '../maintenance/ReportProblemDialog'
 
 function Detail({ label, value, testId }) {
@@ -143,12 +147,8 @@ export function historyNote(entry) {
       .filter(Boolean)
       .join(' · ')
   }
-  if (entry.action === 'maintenance.reported') {
-    // e.g. "MNT-000001 · High · Screen flickers" (Slice 6.1)
-    return [after.request_number, after.priority ? priorityLabel(after.priority) : null, after.issue_description]
-      .filter(Boolean)
-      .join(' · ')
-  }
+  const maintenance = maintenanceHistoryNote(entry) // Slice 6.1 / 6.2
+  if (maintenance !== null) return maintenance
   if (entry.action === 'asset.updated') {
     // e.g. "Location: Bangalore Floor 2 → Chennai; Serial number: DL-1O01 → DL-1001"
     // category_id is shown by name (the "category" entry), not by number.
@@ -163,7 +163,7 @@ export function historyNote(entry) {
 
 const HISTORY_COLUMNS = [
   { field: 'created_at', label: 'When', render: (e) => formatDateTime(e.created_at) },
-  { field: 'action', label: 'What', render: (e) => historyActionLabel(e.action) },
+  { field: 'action', label: 'What', render: (e) => maintenanceActionLabel(e) ?? historyActionLabel(e.action) },
   { field: 'actor', label: 'By', render: (e) => e.actor?.email ?? 'System' },
   { field: 'note', label: 'Details', render: (e) => historyNote(e) || '—' },
 ]
@@ -192,7 +192,11 @@ function MaintenanceRequests({ requests, error, onRetry }) {
         <TableBody>
           {requests.map((r) => (
             <TableRow key={r.id} data-testid="maintenance-request-row">
-              <TableCell>{r.request_number}</TableCell>
+              <TableCell>
+                <Link component={RouterLink} to={requestPath(r)} underline="hover">
+                  {r.request_number}
+                </Link>
+              </TableCell>
               <TableCell>{formatPlainDate(r.reported_date)}</TableCell>
               <TableCell>{reporterLabel(r.reported_by)}</TableCell>
               <TableCell>{r.priority ? priorityLabel(r.priority) : '—'}</TableCell>
@@ -279,7 +283,10 @@ export default function AssetDetailPage() {
   const canRetire = RETIRABLE_STATUSES.includes(a.status)
   const assignBlocked = assignBlockedReason(a.status)
   const holder = a.current_assignment
-  const openRequest = (requests ?? []).find((r) => r.status === 'reported' || r.status === 'in_progress')
+  const openRequest = (requests ?? []).find((r) => isOpenStatus(r.status))
+  // S14: no retiring while a request is open.
+  let retireBlocked = canRetire ? '' : 'Only Available or Damaged assets can be retired.'
+  if (!retireBlocked && openRequest) retireBlocked = `Cancel or finish ${openRequest.request_number} first.`
 
   // After a save: show the new values and the new history entry.
   const afterChange = (saved, message) => {
@@ -344,13 +351,13 @@ export default function AssetDetailPage() {
             <Button variant="outlined" startIcon={<EditOutlined />} onClick={() => setDialog('edit')}>
               Edit
             </Button>
-            <Tooltip title={canRetire ? '' : 'Only Available or Damaged assets can be retired.'}>
+            <Tooltip title={retireBlocked}>
               <span>
                 <Button
                   variant="outlined"
                   color="error"
                   startIcon={<BlockOutlined />}
-                  disabled={!canRetire}
+                  disabled={Boolean(retireBlocked)}
                   onClick={() => setDialog('retire')}
                 >
                   Retire…

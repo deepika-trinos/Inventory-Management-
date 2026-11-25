@@ -483,6 +483,20 @@ def update_asset(
     return asset
 
 
+def _ensure_no_open_request(db: Session, asset: Asset) -> None:
+    """S14 (Slice 6.2): an asset with an open (Reported or In Progress) maintenance request cannot be
+    retired. Checked after the asset row is locked; reporting locks the same row first."""
+    from app.modules.maintenance import service as maintenance_service  # imported here: it imports this module
+
+    open_request = maintenance_service.open_request(db, asset.id)
+    if open_request is not None:
+        raise AppError(
+            409, "asset_has_open_request",
+            f"{asset.asset_code} has an open maintenance request. Cancel or finish {open_request.request_number} first.",
+            {"request_number": open_request.request_number},
+        )
+
+
 def retire_asset(
     db: Session,
     *,
@@ -496,7 +510,8 @@ def retire_asset(
     one transaction. Cannot be undone.
 
     Errors: 409 `asset_retired` (already retired); 409 `asset_not_retirable` (Assigned
-    or Under Maintenance, `details.status`); 422 `invalid_retire_reason`."""
+    or Under Maintenance, `details.status`); 409 `asset_has_open_request` (a Reported or In
+    Progress maintenance request, Slice 6.2, S14); 422 `invalid_retire_reason`."""
     asset = _lock(db, asset)
     try:
         _ensure_not_retired(asset)
@@ -509,6 +524,7 @@ def retire_asset(
                 f"{asset.asset_code} is {label}. Only Available or Damaged assets can be retired. {hint}".strip(),
                 {"status": asset.status},
             )
+        _ensure_no_open_request(db, asset)  # Slice 6.2, S14
         clean_reason = _text(
             reason, required=True, max_length=RETIRE_REASON_MAX_LENGTH,
             code="invalid_retire_reason", label="reason for retiring",

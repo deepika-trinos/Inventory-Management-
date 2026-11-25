@@ -6,10 +6,17 @@ decisions M2, M3, M7 in decisions.md section 32).
 - GET  /maintenance-requests              : every request, paged (staff; the Maintenance page)
 - POST /me/maintenance-requests           : an Employee reports a problem with an asset they hold (MNT-01)
 
+Slice 6.2 (MNT-04 to MNT-07; owner's answers S1-S14; decisions U2-U6), staff only:
+- GET   /maintenance-requests/{ref}           : one request with its history
+- POST  /maintenance-requests/{ref}/start     : Reported -> In Progress (asset Under Maintenance)
+- POST  /maintenance-requests/{ref}/complete  : In Progress -> Completed (asset stays Under Maintenance)
+- POST  /maintenance-requests/{ref}/cancel    : Reported or In Progress -> Cancelled
+- PATCH /maintenance-requests/{ref}           : priority and details while open
+
 Staff = Admin and IT Manager (Q13: no technician role). Reporting never changes the asset's status (Q9).
 """
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -22,10 +29,15 @@ from app.modules.audit.service import AuditContext, get_audit_context
 from app.modules.auth.dependencies import require_roles
 from app.modules.maintenance import service
 from app.modules.maintenance.schemas import (
+    MaintenanceCancel,
+    MaintenanceComplete,
     MaintenanceReport,
+    MaintenanceRequestDetail,
     MaintenanceRequestPage,
     MaintenanceRequestRead,
+    MaintenanceStart,
     MaintenanceStatusField,
+    MaintenanceUpdate,
     MyMaintenanceReport,
     MyMaintenanceRequestRead,
 )
@@ -64,6 +76,122 @@ def list_requests(
     page = service.list_requests(db, params, search=search, status=status_filter)
     page["items"] = [_read(r) for r in page["items"]]
     return page
+
+
+RequestRef = Path(max_length=30, description='The request\'s id (e.g. 5) or number (e.g. "MNT-000005").')
+
+
+def _detail(db: Session, request) -> MaintenanceRequestDetail:
+    return MaintenanceRequestDetail.model_validate(
+        {**service.read(request), "history": service.request_history(db, request)}
+    )
+
+
+@router.get(
+    "/{request_ref}", response_model=MaintenanceRequestDetail, summary="Get one maintenance request",
+    responses=error_responses(404),
+)
+def get_request(request_ref: str = RequestRef, db: Session = Depends(get_db)) -> MaintenanceRequestDetail:
+    """One request with its progress and its history, newest first (Slice 6.2, U2, S13).
+    Unknown: **404** `maintenance_request_not_found`."""
+    return _detail(db, service.get_request(db, request_ref))
+
+
+@router.post(
+    "/{request_ref}/start", response_model=MaintenanceRequestDetail, summary="Start work (Reported -> In Progress)",
+    responses=error_responses(404, 409, 422),
+)
+def start_work(
+    body: MaintenanceStart,
+    request_ref: str = RequestRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestDetail:
+    """The asset becomes **Under Maintenance** and cannot be assigned (Q9, BR-05). One transaction with
+    audit `maintenance.status_changed`.
+
+    - Not Reported: **409** `invalid_status_change` (`details.from`, `details.to`)
+    - Asset Assigned: **409** `asset_assigned` (return it first, S1); Retired: **409** `asset_retired`
+    - Start date in the future: **422** `started_date_in_future`; before the reported date:
+      **422** `started_date_before_reported`
+    - Service provider over 200 characters: **422** `invalid_service_provider`"""
+    request = service.get_request(db, request_ref)
+    saved = service.start_work(
+        db, actor=user, request=request, started_date=body.started_date,
+        service_provider=body.service_provider, context=context,
+    )
+    return _detail(db, saved)
+
+
+@router.post(
+    "/{request_ref}/complete", response_model=MaintenanceRequestDetail,
+    summary="Mark completed (In Progress -> Completed)", responses=error_responses(404, 409, 422),
+)
+def complete_work(
+    body: MaintenanceComplete,
+    request_ref: str = RequestRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestDetail:
+    """Records the repair (MNT-05). The asset **stays Under Maintenance** until it is inspected
+    (Slice 6.3, MNT-07). One transaction with audit `maintenance.status_changed`.
+
+    - Not In Progress: **409** `invalid_status_change`
+    - Repair notes missing, blank or over 1,000: **422** `invalid_repair_notes`
+    - Completion date in the future: **422** `completion_date_in_future`; before the start date:
+      **422** `completion_date_before_start`
+    - Cost below 0 or more than 2 decimals: **422** `validation_error`"""
+    request = service.get_request(db, request_ref)
+    saved = service.complete_work(
+        db, actor=user, request=request, repair_notes=body.repair_notes, completion_date=body.completion_date,
+        service_provider=body.service_provider, cost=body.cost, context=context,
+    )
+    return _detail(db, saved)
+
+
+@router.post(
+    "/{request_ref}/cancel", response_model=MaintenanceRequestDetail, summary="Cancel a request",
+    responses=error_responses(404, 409, 422),
+)
+def cancel_request(
+    body: MaintenanceCancel,
+    request_ref: str = RequestRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestDetail:
+    """From Reported (asset unchanged) or In Progress (asset stays Under Maintenance until inspected,
+    S2). Final. One transaction with audit `maintenance.status_changed`.
+
+    - Completed or Cancelled: **409** `invalid_status_change`
+    - Reason missing, blank or over 500: **422** `invalid_cancel_reason`"""
+    request = service.get_request(db, request_ref)
+    return _detail(db, service.cancel_request(db, actor=user, request=request, reason=body.reason, context=context))
+
+
+@router.patch(
+    "/{request_ref}", response_model=MaintenanceRequestDetail, summary="Edit a request's priority and details",
+    responses=error_responses(404, 409, 422),
+)
+def update_request(
+    body: MaintenanceUpdate,
+    request_ref: str = RequestRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestDetail:
+    """Change `priority`, `service_provider`, `repair_notes` or `cost` while the request is Reported or
+    In Progress (S6, S9, S10, S12). Send only what changes; `null` clears. Audit `maintenance.updated`
+    with the old and new values; an edit that changes nothing saves nothing.
+
+    - Completed or Cancelled: **409** `maintenance_request_closed`
+    - Too long: **422** `invalid_service_provider` / `invalid_repair_notes`; bad priority or cost, or any
+      other field: **422** `validation_error`"""
+    request = service.get_request(db, request_ref)
+    changes = body.model_dump(exclude_unset=True)
+    return _detail(db, service.update_request(db, actor=user, request=request, changes=changes, context=context))
 
 
 @asset_router.get(

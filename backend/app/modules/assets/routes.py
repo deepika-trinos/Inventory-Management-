@@ -199,6 +199,7 @@ def retire_asset(
 
     - Only from Available or Damaged; Assigned or Under Maintenance: **409** `asset_not_retirable`
     - Already retired: **409** `asset_retired`
+    - An open maintenance request: **409** `asset_has_open_request` (`details.request_number`; Slice 6.2, S14)
     - Missing or too long reason (max 500): **422** `invalid_retire_reason`
     - Writes audit action `asset.retired` with the reason."""
     asset = service.get_asset(db, asset_ref)

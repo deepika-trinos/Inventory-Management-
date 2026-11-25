@@ -58,3 +58,57 @@ export async function listRequests({ page = 1, pageSize = 20, sort, search, stat
   const { data } = await apiClient.get('/api/v1/maintenance-requests', { params })
   return data
 }
+
+// ---- Slice 6.2: repair progress (MNT-04 to MNT-07; owner's answers S1-S14) ----------------------
+export const SERVICE_PROVIDER_MAX = 200 // S9
+export const REPAIR_NOTES_MAX = 1000 // S12
+export const CANCEL_REASON_MAX = 500 // S11
+
+/** Open = Reported or In Progress (O2). */
+export function isOpenStatus(status) {
+  return status === 'reported' || status === 'in_progress'
+}
+
+/** The request page's address. */
+export function requestPath(request) {
+  return `/maintenance/${encodeURIComponent(request.request_number)}`
+}
+
+// Admin and IT Manager: one request with its history (newest first).
+export async function getRequest(ref) {
+  const { data } = await apiClient.get(`/api/v1/maintenance-requests/${encodeURIComponent(ref)}`)
+  return data
+}
+
+const progressUrl = (ref, action) => `/api/v1/maintenance-requests/${encodeURIComponent(ref)}/${action}`
+
+// Reported -> In Progress: the asset becomes Under Maintenance (Q9).
+export async function startWork(ref, { startedDate, serviceProvider }) {
+  const body = {}
+  if (startedDate) body.started_date = startedDate
+  if (serviceProvider) body.service_provider = serviceProvider
+  const { data } = await apiClient.post(progressUrl(ref, 'start'), body)
+  return data
+}
+
+// In Progress -> Completed: the asset stays Under Maintenance until inspected (Slice 6.3).
+export async function completeWork(ref, { repairNotes, completionDate, serviceProvider, cost }) {
+  const body = { repair_notes: repairNotes }
+  if (completionDate) body.completion_date = completionDate
+  if (serviceProvider) body.service_provider = serviceProvider
+  if (cost !== '' && cost !== null && cost !== undefined) body.cost = cost
+  const { data } = await apiClient.post(progressUrl(ref, 'complete'), body)
+  return data
+}
+
+// Reported or In Progress -> Cancelled (required reason, S11).
+export async function cancelRequest(ref, reason) {
+  const { data } = await apiClient.post(progressUrl(ref, 'cancel'), { reason })
+  return data
+}
+
+// Priority and details while open: send only what changes; null clears.
+export async function updateRequest(ref, changes) {
+  const { data } = await apiClient.patch(`/api/v1/maintenance-requests/${encodeURIComponent(ref)}`, changes)
+  return data
+}

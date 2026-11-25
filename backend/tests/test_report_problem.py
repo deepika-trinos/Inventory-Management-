@@ -73,9 +73,21 @@ def asset_id(code: str) -> int:
 
 
 def close_request(number: str, status: str = "completed") -> None:
-    """Test-only shortcut until Slice 6.2 builds the status changes."""
+    """Test-only shortcut to put a request in another status without the Slice 6.2 actions. Since
+    migration 0016 the database requires each status's fields (who / when started, completed or
+    cancelled), so they are filled in too, by the request's reporter, on its reported date."""
+    fields = {
+        "in_progress": "started_date = reported_date, started_at = now(), started_by_user_id = reported_by_user_id",
+        "completed": "started_date = reported_date, started_at = now(), started_by_user_id = reported_by_user_id,"
+        " completion_date = reported_date, completed_at = now(), completed_by_user_id = reported_by_user_id,"
+        " repair_notes = 'Test repair'",
+        "cancelled": "cancelled_at = now(), cancelled_by_user_id = reported_by_user_id, cancel_reason = 'Test'",
+    }[status]
     with SessionLocal() as s:
-        s.execute(text("UPDATE maintenance_requests SET status = :s WHERE request_number = :n"), {"s": status, "n": number})
+        s.execute(
+            text(f"UPDATE maintenance_requests SET status = :s, {fields} WHERE request_number = :n"),
+            {"s": status, "n": number},
+        )
         s.commit()
 
 

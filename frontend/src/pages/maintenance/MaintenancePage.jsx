@@ -1,18 +1,19 @@
 // Maintenance page: /maintenance (Admin and IT Manager, Slice 6.1: MNT-02, MNT-03; owner's answer O12).
 // Every maintenance request, newest first: number, asset, issue, priority, status, reported date and
 // who reported it (an Employee's own reports included). Search, status filter, paging, sorted on the
-// server. No "new request" button: staff report a problem from the asset page. A row opens the asset.
+// server. No "new request" button: staff report a problem from the asset page. A row opens the
+// request page (Slice 6.2; in 6.1 it opened the asset page).
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button, MenuItem, Stack, TextField, Typography } from '@mui/material'
 
-import { assetPath } from '../../api/assets'
 import {
   listRequests,
   MAINTENANCE_STATUS_LABELS,
   maintenanceStatusLabel,
   priorityLabel,
   reporterLabel,
+  requestPath,
 } from '../../api/maintenance'
 import DataTable from '../../components/DataTable'
 import StatusBadge from '../../components/StatusBadge'
@@ -81,8 +82,8 @@ export default function MaintenancePage() {
         toolbar={filters}
         filtersActive={filtersActive}
         onClearFilters={clearFilters}
-        onRowClick={(r) => navigate(assetPath(r.asset))}
-        rowLabel={(r) => `Open ${r.asset.asset_code} (${r.request_number})`}
+        onRowClick={(r) => navigate(requestPath(r))}
+        rowLabel={(r) => `Open ${r.request_number} (${r.asset.asset_code})`}
       />
     </Stack>
   )

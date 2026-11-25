@@ -14,9 +14,22 @@ RULES
 - Reporting NEVER changes the asset's status (Q9).
 - ONE transaction: the request and audit maintenance.reported (on the asset, so it shows in its
   history, E2 / O14). A failure saves nothing.
+
+REPAIR PROGRESS (Slice 6.2: MNT-04 to MNT-07, BR-05; owner's answers S1-S14; decisions U1-U9)
+- Reported -> In Progress (start work): the asset becomes Under Maintenance (Q9). Refused while the
+  asset is Assigned ("Return it first.", S1) or Retired.
+- In Progress -> Completed: completion date and repair notes required (S5); the asset STAYS Under
+  Maintenance until the Slice 6.3 inspection (MNT-07).
+- Reported or In Progress -> Cancelled: required reason (S11). From Reported the asset is unchanged;
+  from In Progress it stays Under Maintenance (S2).
+- Everything else is refused (S3, S4: Completed and Cancelled are final).
+- Priority and details (provider, notes, cost) can be edited while the request is open (S6, S9, S10, S12).
+- Every change: lock the asset row, then the request row; save the change, the asset's status and the
+  audit row (maintenance.status_changed / maintenance.updated, on the asset, U6) together.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -34,7 +47,16 @@ from app.modules.audit import service as audit
 from app.modules.audit.actions import AuditAction
 from app.modules.audit.service import AuditContext
 from app.modules.employees.models import Employee
-from app.modules.maintenance.models import ISSUE_MAX_LENGTH, MaintenanceRequest, MaintenanceStatus
+from app.modules.audit.models import AuditLog
+from app.modules.maintenance.models import (
+    CANCEL_REASON_MAX_LENGTH,
+    ISSUE_MAX_LENGTH,
+    REPAIR_NOTES_MAX_LENGTH,
+    REQUEST_NUMBER_PREFIX,
+    SERVICE_PROVIDER_MAX_LENGTH,
+    MaintenanceRequest,
+    MaintenanceStatus,
+)
 from app.modules.users.models import User
 
 OPEN_ASSET_INDEX = "uq_maintenance_requests_open_asset"
@@ -271,7 +293,24 @@ def read(request: MaintenanceRequest) -> dict[str, Any]:
         "reported_date": request.reported_date,
         "reported_by": {"id": reporter.id, "email": reporter.email, "role": reporter.role.name},
         "created_at": request.created_at,
+        # Slice 6.2 (U1)
+        "started_date": request.started_date,
+        "started_at": request.started_at,
+        "started_by": _user(request.started_by),
+        "service_provider": request.service_provider,
+        "repair_notes": request.repair_notes,
+        "cost": request.cost,
+        "completion_date": request.completion_date,
+        "completed_at": request.completed_at,
+        "completed_by": _user(request.completed_by),
+        "cancelled_at": request.cancelled_at,
+        "cancelled_by": _user(request.cancelled_by),
+        "cancel_reason": request.cancel_reason,
     }
+
+
+def _user(user: User | None) -> dict[str, Any] | None:
+    return {"id": user.id, "email": user.email, "role": user.role.name} if user is not None else None
 
 
 def summary(request: MaintenanceRequest | None) -> dict[str, Any] | None:
@@ -283,3 +322,315 @@ def summary(request: MaintenanceRequest | None) -> dict[str, Any] | None:
         "status": request.status,
         "reported_date": request.reported_date,
     }
+
+
+# ---- Repair progress (Slice 6.2) ------------------------------------------------------------------
+_STATUS_LABELS = {
+    MaintenanceStatus.REPORTED: "Reported",
+    MaintenanceStatus.IN_PROGRESS: "In Progress",
+    MaintenanceStatus.COMPLETED: "Completed",
+    MaintenanceStatus.CANCELLED: "Cancelled",
+}
+
+# Which moves are allowed (U3, S3, S4): target status -> statuses it can come from.
+_ALLOWED_MOVES = {
+    MaintenanceStatus.IN_PROGRESS: {MaintenanceStatus.REPORTED},
+    MaintenanceStatus.COMPLETED: {MaintenanceStatus.IN_PROGRESS},
+    MaintenanceStatus.CANCELLED: {MaintenanceStatus.REPORTED, MaintenanceStatus.IN_PROGRESS},
+}
+
+PROVIDER_LABEL = "service provider or responsible person"
+
+
+def get_request(db: Session, ref: str | int) -> MaintenanceRequest:
+    """One request by its id (e.g. 5) or its number (e.g. "MNT-000005", any case)."""
+    text_ref = str(ref).strip()
+    request: MaintenanceRequest | None = None
+    if text_ref.isdigit():
+        request = db.get(MaintenanceRequest, int(text_ref))
+    elif text_ref.upper().startswith(REQUEST_NUMBER_PREFIX):
+        request = db.scalar(select(MaintenanceRequest).where(MaintenanceRequest.request_number == text_ref.upper()))
+    if request is None:
+        raise AppError(404, "maintenance_request_not_found", "Maintenance request not found.")
+    return request
+
+
+def request_history(db: Session, request: MaintenanceRequest) -> list[dict[str, Any]]:
+    """The request's history (S13, U6): the asset's audit rows that belong to this request, newest first."""
+    rows = db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.entity_type == Asset.__tablename__,
+            AuditLog.entity_id == str(request.asset_id),
+            AuditLog.action.like("maintenance.%"),
+            AuditLog.after_data["request_id"].astext == str(request.id),
+        )
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+    ).all()
+    actor_ids = {r.actor_user_id for r in rows if r.actor_user_id is not None}
+    actors = {u.id: u for u in db.scalars(select(User).where(User.id.in_(actor_ids)))} if actor_ids else {}
+    return [
+        {
+            "id": r.id, "action": r.action, "created_at": r.created_at, "actor": actors.get(r.actor_user_id),
+            "before": r.before_data, "after": r.after_data,
+        }
+        for r in rows
+    ]
+
+
+def _lock_both(db: Session, request: MaintenanceRequest) -> tuple[Asset, MaintenanceRequest]:
+    """Lock the asset row first, then the request row (always in this order, U5), and re-read both."""
+    asset = assets_service._lock(db, request.asset)
+    locked = db.scalars(
+        select(MaintenanceRequest)
+        .where(MaintenanceRequest.id == request.id)
+        .with_for_update(of=MaintenanceRequest)
+        .execution_options(populate_existing=True)
+    ).unique().one()
+    return asset, locked
+
+
+def _ensure_move(request: MaintenanceRequest, to: str) -> None:
+    if request.status in _ALLOWED_MOVES[to]:
+        return
+    frm, dest = _STATUS_LABELS[request.status], _STATUS_LABELS[to]
+    if request.status in (MaintenanceStatus.COMPLETED, MaintenanceStatus.CANCELLED):
+        hint = f"{request.request_number} is {frm} and cannot be changed any more."
+    else:
+        hint = f"{request.request_number} cannot go from {frm} to {dest}."
+        if to == MaintenanceStatus.COMPLETED:
+            hint += " Start work first."
+    raise AppError(409, "invalid_status_change", hint, {"from": request.status, "to": to})
+
+
+def _clean(value: str | None, *, max_length: int, code: str, label: str, required: bool = False) -> str | None:
+    text_value = (value or "").strip() or None
+    if text_value is None and required:
+        raise AppError(422, code, f"Please enter the {label}.")
+    if text_value is not None and len(text_value) > max_length:
+        raise AppError(422, code, f"The {label} can be at most {max_length:,} characters.")
+    return text_value
+
+
+def _provider(value: str | None) -> str | None:
+    return _clean(value, max_length=SERVICE_PROVIDER_MAX_LENGTH, code="invalid_service_provider", label=PROVIDER_LABEL)
+
+
+def _started_date(request: MaintenanceRequest, value: date | None) -> date:
+    """S8: today by default; earlier allowed; never in the future; not before the reported date."""
+    today = _today()
+    on = value or today
+    if on > today:
+        raise AppError(422, "started_date_in_future", "The work started date cannot be in the future.")
+    if on < request.reported_date:
+        raise AppError(
+            422, "started_date_before_reported",
+            f"Work cannot start before the problem was reported ({request.reported_date.isoformat()}).",
+            {"reported_date": request.reported_date.isoformat()},
+        )
+    return on
+
+
+def _completion_date(request: MaintenanceRequest, value: date | None) -> date:
+    """S7: today by default; earlier allowed; never in the future; not before the start date."""
+    today = _today()
+    on = value or today
+    if on > today:
+        raise AppError(422, "completion_date_in_future", "The completion date cannot be in the future.")
+    if request.started_date is not None and on < request.started_date:
+        raise AppError(
+            422, "completion_date_before_start",
+            f"The completion date cannot be before work started ({request.started_date.isoformat()}).",
+            {"started_date": request.started_date.isoformat()},
+        )
+    return on
+
+
+def _money(value: Decimal | None) -> Decimal | None:
+    """S6: always 2 decimals, so the request and its audit row show the same amount (300 -> 300.00)."""
+    return value.quantize(Decimal("0.01")) if value is not None else None
+
+
+def _ids(request: MaintenanceRequest) -> dict[str, Any]:
+    return {"request_id": request.id, "request_number": request.request_number}
+
+
+def _audit_and_commit(db: Session, *, actor: User, asset: Asset, action: str, before: dict, after: dict, context) -> None:
+    audit.record(db, actor=actor, action=action, entity=asset, before=before, after=after, context=context)
+    db.commit()
+
+
+def start_work(
+    db: Session, *, actor: User, request: MaintenanceRequest, started_date: date | None = None,
+    service_provider: str | None = None, context: AuditContext | None = None,
+) -> MaintenanceRequest:
+    """Reported -> In Progress (MNT-04). The asset becomes Under Maintenance (Q9) and cannot be
+    assigned (BR-05). Refused while the asset is Assigned (S1) or Retired.
+
+    Errors: 409 `invalid_status_change`, `asset_assigned`, `asset_retired`; 422
+    `started_date_in_future`, `started_date_before_reported`, `invalid_service_provider`."""
+    try:
+        asset, request = _lock_both(db, request)
+        _ensure_move(request, MaintenanceStatus.IN_PROGRESS)
+        if asset.status == AssetStatus.ASSIGNED:
+            raise AppError(
+                409, "asset_assigned",
+                f"{asset.asset_code} is assigned to an employee. Return it first, then start work.",
+                {"status": asset.status},
+            )
+        if asset.status == AssetStatus.RETIRED:
+            raise AppError(409, "asset_retired", f"{asset.asset_code} is retired.", {"status": asset.status})
+        on = _started_date(request, started_date)
+        provider = _provider(service_provider)
+
+        before = {**_ids(request), "status": request.status, "asset_status": asset.status}
+        request.status = MaintenanceStatus.IN_PROGRESS
+        request.started_date = on
+        request.started_at = func.now()  # database time, like the audit row
+        request.started_by_user_id = actor.id
+        if provider is not None:
+            request.service_provider = provider
+        asset.status = AssetStatus.UNDER_MAINTENANCE
+        after = {
+            **_ids(request), "status": MaintenanceStatus.IN_PROGRESS, "asset_status": asset.status,
+            "started_date": on, "service_provider": request.service_provider,
+        }
+        _audit_and_commit(
+            db, actor=actor, asset=asset, action=AuditAction.MAINTENANCE_STATUS_CHANGED,
+            before=before, after=after, context=context,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(request)
+    return request
+
+
+def complete_work(
+    db: Session, *, actor: User, request: MaintenanceRequest, repair_notes: str | None,
+    completion_date: date | None = None, service_provider: str | None = None, cost: Decimal | None = None,
+    context: AuditContext | None = None,
+) -> MaintenanceRequest:
+    """In Progress -> Completed (MNT-04, MNT-05). Completion date and repair notes required (S5); the
+    asset stays Under Maintenance until the Slice 6.3 inspection (MNT-07).
+
+    Errors: 409 `invalid_status_change`; 422 `invalid_repair_notes`, `completion_date_in_future`,
+    `completion_date_before_start`, `invalid_service_provider`."""
+    try:
+        asset, request = _lock_both(db, request)
+        _ensure_move(request, MaintenanceStatus.COMPLETED)
+        notes = _clean(
+            repair_notes, max_length=REPAIR_NOTES_MAX_LENGTH, code="invalid_repair_notes",
+            label="repair notes (what was done)", required=True,
+        )
+        on = _completion_date(request, completion_date)
+        provider = _provider(service_provider)
+
+        before = {**_ids(request), "status": request.status}
+        request.status = MaintenanceStatus.COMPLETED
+        request.repair_notes = notes
+        request.completion_date = on
+        request.completed_at = func.now()
+        request.completed_by_user_id = actor.id
+        if provider is not None:
+            request.service_provider = provider
+        if cost is not None:
+            request.cost = _money(cost)
+        after = {
+            **_ids(request), "status": MaintenanceStatus.COMPLETED, "asset_status": asset.status,
+            "completion_date": on, "repair_notes": notes, "service_provider": request.service_provider,
+            "cost": request.cost,
+        }
+        _audit_and_commit(
+            db, actor=actor, asset=asset, action=AuditAction.MAINTENANCE_STATUS_CHANGED,
+            before=before, after=after, context=context,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(request)
+    return request
+
+
+def cancel_request(
+    db: Session, *, actor: User, request: MaintenanceRequest, reason: str | None,
+    context: AuditContext | None = None,
+) -> MaintenanceRequest:
+    """Reported or In Progress -> Cancelled (MNT-04, S11). From Reported the asset is unchanged; from
+    In Progress it stays Under Maintenance until the Slice 6.3 inspection (S2). Final (S4).
+
+    Errors: 409 `invalid_status_change`; 422 `invalid_cancel_reason`."""
+    try:
+        asset, request = _lock_both(db, request)
+        _ensure_move(request, MaintenanceStatus.CANCELLED)
+        clean_reason = _clean(
+            reason, max_length=CANCEL_REASON_MAX_LENGTH, code="invalid_cancel_reason",
+            label="reason for cancelling", required=True,
+        )
+        before = {**_ids(request), "status": request.status}
+        request.status = MaintenanceStatus.CANCELLED
+        request.cancelled_at = func.now()
+        request.cancelled_by_user_id = actor.id
+        request.cancel_reason = clean_reason
+        after = {
+            **_ids(request), "status": MaintenanceStatus.CANCELLED, "asset_status": asset.status,
+            "reason": clean_reason,
+        }
+        _audit_and_commit(
+            db, actor=actor, asset=asset, action=AuditAction.MAINTENANCE_STATUS_CHANGED,
+            before=before, after=after, context=context,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(request)
+    return request
+
+
+def update_request(
+    db: Session, *, actor: User, request: MaintenanceRequest, changes: dict[str, Any],
+    context: AuditContext | None = None,
+) -> MaintenanceRequest:
+    """Edit priority, service provider, repair notes and cost while the request is open (S6, S9, S10,
+    S12). Only what changes is saved and audited (maintenance.updated, old and new values); an edit
+    that changes nothing writes nothing.
+
+    Errors: 409 `maintenance_request_closed`; 422 `invalid_service_provider`, `invalid_repair_notes`."""
+    try:
+        asset, request = _lock_both(db, request)
+        if not request.is_open:
+            raise AppError(
+                409, "maintenance_request_closed",
+                f"{request.request_number} is {_STATUS_LABELS[request.status]} and cannot be changed any more.",
+                {"status": request.status},
+            )
+        cleaned: dict[str, Any] = {}
+        for field, value in changes.items():
+            if field == "service_provider":
+                value = _provider(value)
+            elif field == "repair_notes":
+                value = _clean(
+                    value, max_length=REPAIR_NOTES_MAX_LENGTH, code="invalid_repair_notes", label="repair notes"
+                )
+            elif field == "cost":
+                value = _money(value)
+            cleaned[field] = value
+        before: dict[str, Any] = {}
+        after: dict[str, Any] = {}
+        for field, value in cleaned.items():
+            old = getattr(request, field)
+            if old != value:
+                before[field], after[field] = old, value
+                setattr(request, field, value)
+        if not after:
+            db.rollback()  # nothing changed: nothing saved, no audit row (as B16)
+            return get_request(db, request.id)
+        _audit_and_commit(
+            db, actor=actor, asset=asset, action=AuditAction.MAINTENANCE_UPDATED,
+            before={**_ids(request), **before}, after={**_ids(request), **after}, context=context,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(request)
+    return request

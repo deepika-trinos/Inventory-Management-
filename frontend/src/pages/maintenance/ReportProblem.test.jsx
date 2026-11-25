@@ -69,6 +69,11 @@ function AssetStandIn() {
   return <p>Asset page {assetId}</p>
 }
 
+function RequestStandIn() {
+  const { requestRef } = useParams()
+  return <p>Request page {requestRef}</p>
+}
+
 function renderAt(path, element, routePath = path) {
   render(
     <NotificationProvider>
@@ -76,6 +81,7 @@ function renderAt(path, element, routePath = path) {
         <Routes>
           <Route path={routePath} element={element} />
           <Route path="/assets/:assetId" element={<AssetStandIn />} />
+          <Route path="/maintenance/:requestRef" element={<RequestStandIn />} />
         </Routes>
       </MemoryRouter>
     </NotificationProvider>,
@@ -240,7 +246,7 @@ describe('My Assets (MNT-01, O3, O6, O12)', () => {
 })
 
 describe('Maintenance page (O12)', () => {
-  it('lists the requests and a row opens the asset', async () => {
+  it('lists the requests and a row opens the request page (Slice 6.2)', async () => {
     renderAt('/maintenance', <MaintenancePage />)
 
     expect(await screen.findByText('MNT-000001')).toBeTruthy()
@@ -249,8 +255,8 @@ describe('Maintenance page (O12)', () => {
     expect(screen.getByText('asha@example.com (Employee)')).toBeTruthy()
     expect(listRequests).toHaveBeenCalledWith(expect.objectContaining({ sort: '-request_number', status: '' }))
 
-    fireEvent.click(screen.getByRole('row', { name: 'Open AST-000001 (MNT-000001)' }))
-    expect(await screen.findByText('Asset page AST-000001')).toBeTruthy()
+    fireEvent.click(screen.getByRole('row', { name: 'Open MNT-000001 (AST-000001)' }))
+    expect(await screen.findByText('Request page MNT-000001')).toBeTruthy()
   })
 
   it('filters by status and says when the list is empty', async () => {
