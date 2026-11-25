@@ -17,6 +17,7 @@ from app.modules.audit import service as _audit_service  # noqa: F401  (switches
 from app.modules.categories import models as categories_models  # noqa: F401
 from app.modules.employees import models as employees_models  # noqa: F401
 from app.modules.inventory import models as inventory_models  # noqa: F401
+from app.modules.maintenance import models as maintenance_models  # noqa: F401
 from app.modules.purchases import models as purchases_models  # noqa: F401
 from app.modules.users import models as users_models  # noqa: F401
 from app.modules.vendors import models as vendors_models  # noqa: F401

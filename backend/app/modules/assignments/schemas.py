@@ -6,6 +6,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.assets.schemas import AssetEmployeeSummary, AssetUserSummary
+from app.modules.maintenance.schemas import OpenRequestSummary
 
 
 class AssignmentAssetSummary(BaseModel):
@@ -52,12 +53,21 @@ class EmployeeAssignments(BaseModel):
     past: list[AssignmentRead] = Field(description="Returned, newest return first.")
 
 
+class MyAssignmentRow(MyAssignmentRead):
+    """A My Assets row (Slice 6.1, M7): adds the asset's open maintenance request while the asset
+    is still held, so the screen can show "Problem reported (MNT-...)"."""
+
+    open_request: OpenRequestSummary | None = Field(
+        default=None, description="The asset's open maintenance request (Slice 6.1); empty on past rows."
+    )
+
+
 class MyAssignments(BaseModel):
     """N8: the logged-in Employee's own current and past assignments."""
 
     employee: AssetEmployeeSummary
-    current: list[MyAssignmentRead]
-    past: list[MyAssignmentRead]
+    current: list[MyAssignmentRow]
+    past: list[MyAssignmentRow]
 
 
 class OverduePage(BaseModel):

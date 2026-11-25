@@ -136,6 +136,7 @@ const HISTORY_ACTION_LABELS = {
   'asset.retired': 'Retired',
   'assignment.created': 'Assigned',
   'assignment.returned': 'Returned',
+  'maintenance.reported': 'Problem reported', // Slice 6.1
 }
 
 export function historyActionLabel(action) {

@@ -17,14 +17,36 @@
 // Slice 5.2 (ASN-05, ASN-06, BR-04): a "Return…" button (only while Assigned) opening one
 // form for the return and the inspection (Q5, N4), then a confirm box; afterwards the page
 // shows the new status and no holder; history shows "Returned by Asha Kumar — Damaged: …".
+// Slice 6.1 (MNT-02, MNT-03; owner's answers Q9, Q10, O1, O2, O10, O12): a "Report a problem…"
+// button (not on Retired assets; greyed out while a request is open, O2) opening a form with the
+// issue, optional priority and reported date (no confirm box, O10). The asset keeps its status
+// (Q9). A "Maintenance requests" section lists the asset's requests; history shows
+// "Problem reported · MNT-000001 · High · Screen flickers".
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import AssignmentReturnOutlined from '@mui/icons-material/AssignmentReturnOutlined'
+import BuildOutlined from '@mui/icons-material/BuildOutlined'
 import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import PersonAddAltOutlined from '@mui/icons-material/PersonAddAltOutlined'
-import { Box, Button, Chip, Divider, Link, Paper, Stack, Tooltip, Typography } from '@mui/material'
+import {
+  Box,
+  Button,
+  Chip,
+  Divider,
+  Link,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tooltip,
+  Typography,
+} from '@mui/material'
 
 import {
   assetStatusLabel,
@@ -35,6 +57,7 @@ import {
   RETIRABLE_STATUSES,
 } from '../../api/assets'
 import { getErrorCode } from '../../api/errors'
+import { getAssetRequests, maintenanceStatusLabel, priorityLabel, reporterLabel } from '../../api/maintenance'
 import DataTable from '../../components/DataTable'
 import EmptyState from '../../components/EmptyState'
 import ErrorMessage from '../../components/ErrorMessage'
@@ -47,6 +70,7 @@ import AssetAssignDialog, { employeeName } from './AssetAssignDialog'
 import AssetEditDialog from './AssetEditDialog'
 import AssetRetireDialog from './AssetRetireDialog'
 import AssetReturnDialog from './AssetReturnDialog'
+import ReportProblemDialog from '../maintenance/ReportProblemDialog'
 
 function Detail({ label, value, testId }) {
   return (
@@ -119,6 +143,12 @@ export function historyNote(entry) {
       .filter(Boolean)
       .join(' · ')
   }
+  if (entry.action === 'maintenance.reported') {
+    // e.g. "MNT-000001 · High · Screen flickers" (Slice 6.1)
+    return [after.request_number, after.priority ? priorityLabel(after.priority) : null, after.issue_description]
+      .filter(Boolean)
+      .join(' · ')
+  }
   if (entry.action === 'asset.updated') {
     // e.g. "Location: Bangalore Floor 2 → Chennai; Serial number: DL-1O01 → DL-1001"
     // category_id is shown by name (the "category" entry), not by number.
@@ -137,6 +167,46 @@ const HISTORY_COLUMNS = [
   { field: 'actor', label: 'By', render: (e) => e.actor?.email ?? 'System' },
   { field: 'note', label: 'Details', render: (e) => historyNote(e) || '—' },
 ]
+
+// The asset's maintenance requests, newest first (Slice 6.1, O12).
+function MaintenanceRequests({ requests, error, onRetry }) {
+  if (error) return <ErrorMessage error={error} onRetry={onRetry} />
+  if (!requests) return <LoadingState message="Loading maintenance requests…" />
+  if (requests.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        No maintenance requests.
+      </Typography>
+    )
+  }
+  return (
+    <TableContainer>
+      <Table size="small" aria-label="Maintenance requests">
+        <TableHead>
+          <TableRow>
+            {['Request', 'Reported on', 'Reported by', 'Priority', 'Status', 'Problem'].map((label) => (
+              <TableCell key={label}>{label}</TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {requests.map((r) => (
+            <TableRow key={r.id} data-testid="maintenance-request-row">
+              <TableCell>{r.request_number}</TableCell>
+              <TableCell>{formatPlainDate(r.reported_date)}</TableCell>
+              <TableCell>{reporterLabel(r.reported_by)}</TableCell>
+              <TableCell>{r.priority ? priorityLabel(r.priority) : '—'}</TableCell>
+              <TableCell>
+                <StatusBadge status={maintenanceStatusLabel(r.status)} />
+              </TableCell>
+              <TableCell sx={{ wordBreak: 'break-word' }}>{r.issue_description}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  )
+}
 
 function AssetHistory({ assetRef, reloadKey }) {
   const fetchRows = useCallback((args) => getAssetHistory(assetRef, args), [assetRef])
@@ -158,9 +228,18 @@ export default function AssetDetailPage() {
   const [asset, setAsset] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign' | 'return'
+  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign' | 'return' | 'report'
   const [historyKey, setHistoryKey] = useState(0)
+  const [requests, setRequests] = useState(null) // Slice 6.1
+  const [requestsError, setRequestsError] = useState(null)
   const notify = useNotify()
+
+  const loadRequests = useCallback(() => {
+    setRequestsError(null)
+    getAssetRequests(assetId).then(setRequests).catch(setRequestsError)
+  }, [assetId])
+
+  useEffect(loadRequests, [loadRequests])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -200,6 +279,7 @@ export default function AssetDetailPage() {
   const canRetire = RETIRABLE_STATUSES.includes(a.status)
   const assignBlocked = assignBlockedReason(a.status)
   const holder = a.current_assignment
+  const openRequest = (requests ?? []).find((r) => r.status === 'reported' || r.status === 'in_progress')
 
   // After a save: show the new values and the new history entry.
   const afterChange = (saved, message) => {
@@ -249,6 +329,18 @@ export default function AssetDetailPage() {
                 Return…
               </Button>
             ) : null}
+            <Tooltip title={openRequest ? `${openRequest.request_number} is already open.` : ''}>
+              <span>
+                <Button
+                  variant="outlined"
+                  startIcon={<BuildOutlined />}
+                  disabled={Boolean(openRequest) || requests === null}
+                  onClick={() => setDialog('report')}
+                >
+                  Report a problem…
+                </Button>
+              </span>
+            </Tooltip>
             <Button variant="outlined" startIcon={<EditOutlined />} onClick={() => setDialog('edit')}>
               Edit
             </Button>
@@ -346,6 +438,10 @@ export default function AssetDetailPage() {
         )}
       </Section>
 
+      <Section title="Maintenance requests">
+        <MaintenanceRequests requests={requests} error={requestsError} onRetry={loadRequests} />
+      </Section>
+
       <Section title="History">
         <AssetHistory assetRef={a.asset_code} reloadKey={historyKey} />
       </Section>
@@ -356,6 +452,21 @@ export default function AssetDetailPage() {
           asset={a}
           onClose={() => setDialog(null)}
           onSaved={(saved) => afterChange(saved, `${saved.asset_code} saved.`)}
+        />
+      ) : null}
+
+      {dialog === 'report' ? (
+        <ReportProblemDialog
+          open
+          staff
+          asset={a}
+          onClose={() => setDialog(null)}
+          onReported={(saved) => {
+            setDialog(null)
+            setHistoryKey((n) => n + 1)
+            loadRequests()
+            notify.success(`${saved.request_number} reported.`)
+          }}
         />
       ) : null}
 

@@ -217,6 +217,7 @@ def test_action_list_has_the_agreed_names():
         "stock.adjusted",
         "stock.opening",  # Slice 4.5 (opening stock)
         "stock_item.created", "stock_item.updated", "stock_item.activated", "stock_item.deactivated",  # Slice 2.4
+ "maintenance.reported",  # Slice 6.1 (report a problem)
  "maintenance.status_changed",
     }
 

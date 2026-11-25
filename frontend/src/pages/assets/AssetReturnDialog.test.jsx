@@ -14,6 +14,11 @@ import { todayInCompanyTimezone } from '../../utils/dates'
 import AssetDetailPage, { historyNote } from './AssetDetailPage'
 import AssetReturnDialog, { notesRequired, validateReturn } from './AssetReturnDialog'
 
+// Slice 6.1: the asset page also loads its maintenance requests; none here.
+vi.mock('../../api/maintenance', async (importOriginal) => ({
+  ...(await importOriginal()),
+  getAssetRequests: vi.fn(() => Promise.resolve([])),
+}))
 vi.mock('../../api/assets', async (importOriginal) => ({
   ...(await importOriginal()),
   getAsset: vi.fn(),

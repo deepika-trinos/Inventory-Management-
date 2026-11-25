@@ -21,6 +21,7 @@ import CategoriesPage from '../pages/categories/CategoriesPage'
 import EmployeeDetailPage from '../pages/employees/EmployeeDetailPage'
 import EmployeesPage from '../pages/employees/EmployeesPage'
 import InventoryPage from '../pages/inventory/InventoryPage'
+import MaintenancePage from '../pages/maintenance/MaintenancePage'
 import MyAssetsPage from '../pages/my/MyAssetsPage'
 import StockItemDetailPage from '../pages/inventory/StockItemDetailPage'
 import PurchaseDetailPage from '../pages/purchases/PurchaseDetailPage'
@@ -44,6 +45,7 @@ const BUILT_PAGES = {
   '/categories': CategoriesPage,
   '/employees': EmployeesPage,
   '/inventory': InventoryPage,
+  '/maintenance': MaintenancePage, // Slice 6.1: maintenance requests (O12)
   '/my/assets': MyAssetsPage, // Slice 5.3 (N8, N15)
   '/purchases': PurchasesPage,
   '/users': UsersPage,

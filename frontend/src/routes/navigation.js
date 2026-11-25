@@ -39,7 +39,7 @@ export const PAGES = [
   { path: '/purchases', label: 'Purchases', icon: ShoppingCartOutlined, roles: STAFF, slice: 'Slice 3.1' },
   { path: '/employees', label: 'Employees', icon: BadgeOutlined, roles: STAFF, slice: 'Slice 2.2' },
   { path: '/assignments', label: 'Assignments', icon: AssignmentIndOutlined, roles: STAFF, slice: 'Slice 5.3' },
-  { path: '/maintenance', label: 'Maintenance', icon: BuildOutlined, roles: STAFF, slice: 'Phase 6' },
+  { path: '/maintenance', label: 'Maintenance', icon: BuildOutlined, roles: STAFF, slice: 'Slice 6.1' },
   { path: '/reports', label: 'Reports', icon: SummarizeOutlined, roles: STAFF, slice: 'Phase 7' },
   { path: '/users', label: 'Users', icon: ManageAccountsOutlined, roles: ADMIN_ONLY, slice: 'Slice 1.6' },
   { path: '/audit-log', label: 'Audit Log', icon: HistoryOutlined, roles: ADMIN_ONLY, slice: 'Slice 8.1' },

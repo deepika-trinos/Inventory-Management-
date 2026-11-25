@@ -60,6 +60,7 @@ class AuditAction:
     STOCK_OPENING = "stock.opening"  # Slice 4.5 (opening stock, A6)
 
     # Maintenance
+    MAINTENANCE_REPORTED = "maintenance.reported"  # Slice 6.1 (report a problem, O14)
     MAINTENANCE_STATUS_CHANGED = "maintenance.status_changed"  # Slices 6.2-6.3
 
     @classmethod

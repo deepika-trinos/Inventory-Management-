@@ -19,6 +19,9 @@ from app.modules.categories.routes import router as categories_router
 from app.modules.employees.routes import router as employees_router
 from app.modules.health.routes import router as health_router
 from app.modules.inventory.routes import router as inventory_router
+from app.modules.maintenance.routes import asset_router as asset_maintenance_router
+from app.modules.maintenance.routes import me_router as my_maintenance_router
+from app.modules.maintenance.routes import router as maintenance_router
 from app.modules.purchases.routes import router as purchases_router
 from app.modules.users.routes import router as users_router
 from app.modules.vendors.routes import router as vendors_router
@@ -83,4 +86,7 @@ api_router.include_router(purchases_router)
 api_router.include_router(assets_router)
 api_router.include_router(assignments_router)
 api_router.include_router(my_assignments_router)
+api_router.include_router(maintenance_router)
+api_router.include_router(asset_maintenance_router)
+api_router.include_router(my_maintenance_router)
 app.include_router(api_router)

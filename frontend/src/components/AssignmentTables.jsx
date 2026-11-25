@@ -6,6 +6,7 @@
 // staff: asset IDs link to the asset page, and the past table also shows the condition notes and
 // who assigned / returned it. Without it (My Assets) those are left out (N12) and nothing links to
 // pages an Employee cannot open. An overdue item (N7) gets a red "N days overdue" badge.
+// extraCurrentColumns (Slice 6.1): more columns for the current table, e.g. My Assets' "Problem".
 import { Link as RouterLink } from 'react-router'
 import { Chip, Link, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material'
 
@@ -68,7 +69,7 @@ function Section({ title, empty, columns, rows }) {
   )
 }
 
-export default function AssignmentTables({ data, staff = false, emptyCurrent = 'No assets held now.' }) {
+export default function AssignmentTables({ data, staff = false, emptyCurrent = 'No assets held now.', extraCurrentColumns = [] }) {
   const date = (value) => (value ? formatPlainDate(value) : dash)
   const asset = { label: 'Asset', render: (a) => <AssetCell asset={a.asset} staff={staff} /> }
   const serial = { label: 'Serial number', render: (a) => a.asset.serial_number }
@@ -88,6 +89,7 @@ export default function AssignmentTables({ data, staff = false, emptyCurrent = '
     },
   ]
   if (staff) currentColumns.push({ label: 'Assigned by', render: (a) => a.assigned_by?.email ?? dash })
+  currentColumns.push(...extraCurrentColumns)
 
   const pastColumns = [
     asset,

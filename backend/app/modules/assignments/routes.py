@@ -17,6 +17,7 @@ from app.core.pagination import PageParams, page_params
 from app.modules.assignments import service
 from app.modules.assignments.schemas import AssignmentRead, MyAssignments, OverduePage
 from app.modules.auth.dependencies import require_roles
+from app.modules.maintenance import service as maintenance_service
 from app.modules.users.models import RoleName, User
 
 require_staff = require_roles(RoleName.ADMIN, RoleName.IT_MANAGER)
@@ -49,11 +50,19 @@ def list_overdue(
 def my_assignments(user: User = Depends(require_employee), db: Session = Depends(get_db)) -> dict:
     """N8: the logged-in Employee's own current assets and past assignments, read-only, found
     through the link between their login and their employee record. Leaves out condition notes and
-    staff e-mails (N12). Admin and IT Manager: 403 (N13). Login not linked: **404** `employee_not_linked`."""
+    staff e-mails (N12). Admin and IT Manager: 403 (N13). Login not linked: **404** `employee_not_linked`.
+    Current rows carry `open_request`: the asset's open maintenance request, if any (Slice 6.1)."""
     employee = service.employee_of_login(db, user)
     held = service.employee_assignments(db, employee.id)
+    open_requests = maintenance_service.open_requests_for_assets(db, [a.asset_id for a in held["current"]])
     return {
         "employee": employee,
-        "current": [service.read(a, for_employee=True) for a in held["current"]],
+        "current": [
+            {
+                **service.read(a, for_employee=True),
+                "open_request": maintenance_service.summary(open_requests.get(a.asset_id)),  # Slice 6.1, M7
+            }
+            for a in held["current"]
+        ],
         "past": [service.read(a, for_employee=True) for a in held["past"]],
     }

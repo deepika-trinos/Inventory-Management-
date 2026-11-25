@@ -3,6 +3,7 @@
 //   - Asset statuses (PRD 8.1): Available, Assigned, Under Maintenance, Damaged, Retired
 //   - Record statuses for master data (Slice 2.1+): Active, Inactive
 //   - Purchase statuses (Slice 3.1, PUR-04): Draft, Received, Cancelled
+//   - Maintenance request statuses (Slice 6.1, MNT-04): Reported, In Progress, Completed, Cancelled
 import { Chip } from '@mui/material'
 
 const ASSET_COLORS = {
@@ -27,7 +28,14 @@ const PURCHASE_COLORS = {
   Cancelled: 'default',
 }
 
-const COLORS = { ...ASSET_COLORS, ...RECORD_COLORS, ...PURCHASE_COLORS }
+// Maintenance requests (Slice 6.1, MNT-04). Cancelled shares the purchase colour above.
+const MAINTENANCE_COLORS = {
+  Reported: 'warning',
+  'In Progress': 'info',
+  Completed: 'success',
+}
+
+const COLORS = { ...ASSET_COLORS, ...RECORD_COLORS, ...PURCHASE_COLORS, ...MAINTENANCE_COLORS }
 const OUTLINED = new Set(['Retired', 'Inactive', 'Cancelled']) // "out of use" looks lighter
 
 export const ASSET_STATUSES = Object.keys(ASSET_COLORS)

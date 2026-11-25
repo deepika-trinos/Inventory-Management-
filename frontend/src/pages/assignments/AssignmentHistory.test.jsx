@@ -152,7 +152,9 @@ describe('My Assets (N8, N11-N13)', () => {
     expect(screen.queryByText(/@example\.com/)).toBeNull()
     expect(screen.queryByRole('columnheader', { name: 'Condition notes' })).toBeNull()
     expect(screen.queryByRole('link', { name: /AST-/ })).toBeNull() // employees cannot open asset pages
-    expect(screen.queryAllByRole('button')).toHaveLength(0) // nothing to change
+    // Nothing to change, except "Report a problem" on the asset held now (Slice 6.1, MNT-01).
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Report a problem'])
+    expect(past.queryAllByRole('button')).toHaveLength(0) // not for a returned asset (O6)
   })
 
   it('says when nothing is held', async () => {

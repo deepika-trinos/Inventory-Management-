@@ -12,6 +12,11 @@ import { getAsset, getAssetHistory, retireAsset, updateAsset } from '../../api/a
 import { NotificationProvider } from '../../context/NotificationContext'
 import AssetDetailPage, { historyNote } from './AssetDetailPage'
 
+// Slice 6.1: the asset page also loads its maintenance requests; none here.
+vi.mock('../../api/maintenance', async (importOriginal) => ({
+  ...(await importOriginal()),
+  getAssetRequests: vi.fn(() => Promise.resolve([])),
+}))
 vi.mock('../../api/assets', async (importOriginal) => ({
   ...(await importOriginal()),
   getAsset: vi.fn(),
