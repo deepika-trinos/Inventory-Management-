@@ -25,6 +25,10 @@
 // Slice 6.2 (MNT-04 to MNT-07; S13, S14): request numbers link to the request page; History shows
 // "Work started", "Repair completed", "Request cancelled" and "Request edited" rows; Retire… is greyed
 // out while a request is open ("Cancel or finish MNT-… first.").
+// Slice 6.3 (MNT-07): while a request awaits inspection, a note "Awaiting inspection after MNT-…" with an
+// Inspect… button (the same form as on the request page); Assign… and Report a problem… are greyed out
+// with that reason. The requests table shows "Awaiting inspection" / "Inspected: …"; History shows
+// "Inspected" rows (and "Retired" when the outcome was Retired).
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
@@ -34,6 +38,7 @@ import BlockOutlined from '@mui/icons-material/BlockOutlined'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import PersonAddAltOutlined from '@mui/icons-material/PersonAddAltOutlined'
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -60,7 +65,16 @@ import {
   RETIRABLE_STATUSES,
 } from '../../api/assets'
 import { getErrorCode } from '../../api/errors'
-import { getAssetRequests, isOpenStatus, maintenanceStatusLabel, priorityLabel, reporterLabel, requestPath } from '../../api/maintenance'
+import {
+  getAssetRequests,
+  INSPECTION_OUTCOME_LABELS,
+  inspectionLabel,
+  isOpenStatus,
+  maintenanceStatusLabel,
+  priorityLabel,
+  reporterLabel,
+  requestPath,
+} from '../../api/maintenance'
 import DataTable from '../../components/DataTable'
 import EmptyState from '../../components/EmptyState'
 import ErrorMessage from '../../components/ErrorMessage'
@@ -74,6 +88,7 @@ import AssetEditDialog from './AssetEditDialog'
 import AssetRetireDialog from './AssetRetireDialog'
 import AssetReturnDialog from './AssetReturnDialog'
 import { maintenanceActionLabel, maintenanceHistoryNote } from '../maintenance/maintenanceHistory'
+import InspectDialog from '../maintenance/InspectDialog'
 import ReportProblemDialog from '../maintenance/ReportProblemDialog'
 
 function Detail({ label, value, testId }) {
@@ -202,6 +217,16 @@ function MaintenanceRequests({ requests, error, onRetry }) {
               <TableCell>{r.priority ? priorityLabel(r.priority) : '—'}</TableCell>
               <TableCell>
                 <StatusBadge status={maintenanceStatusLabel(r.status)} />
+                {inspectionLabel(r) ? (
+                  <Typography
+                    variant="caption"
+                    component="div"
+                    color={r.awaiting_inspection ? 'warning.main' : 'text.secondary'}
+                    data-testid="request-inspection"
+                  >
+                    {inspectionLabel(r)}
+                  </Typography>
+                ) : null}
               </TableCell>
               <TableCell sx={{ wordBreak: 'break-word' }}>{r.issue_description}</TableCell>
             </TableRow>
@@ -232,7 +257,7 @@ export default function AssetDetailPage() {
   const [asset, setAsset] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign' | 'return' | 'report'
+  const [dialog, setDialog] = useState(null) // 'edit' | 'retire' | 'assign' | 'return' | 'report' | 'inspect'
   const [historyKey, setHistoryKey] = useState(0)
   const [requests, setRequests] = useState(null) // Slice 6.1
   const [requestsError, setRequestsError] = useState(null)
@@ -281,9 +306,13 @@ export default function AssetDetailPage() {
   const purchase = a.purchase
   const retired = a.status === 'retired'
   const canRetire = RETIRABLE_STATUSES.includes(a.status)
-  const assignBlocked = assignBlockedReason(a.status)
   const holder = a.current_assignment
   const openRequest = (requests ?? []).find((r) => isOpenStatus(r.status))
+  const waiting = (requests ?? []).find((r) => r.awaiting_inspection) // Slice 6.3
+  const assignBlocked = waiting ? `Awaiting inspection (${waiting.request_number}).` : assignBlockedReason(a.status)
+  let reportBlocked = ''
+  if (openRequest) reportBlocked = `${openRequest.request_number} is already open.`
+  else if (waiting) reportBlocked = `${waiting.request_number} is awaiting inspection. Inspect the asset first.`
   // S14: no retiring while a request is open.
   let retireBlocked = canRetire ? '' : 'Only Available or Damaged assets can be retired.'
   if (!retireBlocked && openRequest) retireBlocked = `Cancel or finish ${openRequest.request_number} first.`
@@ -336,12 +365,17 @@ export default function AssetDetailPage() {
                 Return…
               </Button>
             ) : null}
-            <Tooltip title={openRequest ? `${openRequest.request_number} is already open.` : ''}>
+            {waiting ? (
+              <Button variant="contained" onClick={() => setDialog('inspect')}>
+                Inspect…
+              </Button>
+            ) : null}
+            <Tooltip title={reportBlocked}>
               <span>
                 <Button
                   variant="outlined"
                   startIcon={<BuildOutlined />}
-                  disabled={Boolean(openRequest) || requests === null}
+                  disabled={Boolean(reportBlocked) || requests === null}
                   onClick={() => setDialog('report')}
                 >
                   Report a problem…
@@ -367,6 +401,16 @@ export default function AssetDetailPage() {
           </Stack>
         )}
       </Stack>
+
+      {waiting ? (
+        <Alert severity="warning" data-testid="awaiting-inspection">
+          Awaiting inspection after{' '}
+          <Link component={RouterLink} to={requestPath(waiting)} underline="hover">
+            {waiting.request_number}
+          </Link>
+          . {a.asset_code} stays Under Maintenance until it is inspected.
+        </Alert>
+      ) : null}
 
       <Section title="Details">
         <Box sx={grid}>
@@ -473,6 +517,20 @@ export default function AssetDetailPage() {
             setHistoryKey((n) => n + 1)
             loadRequests()
             notify.success(`${saved.request_number} reported.`)
+          }}
+        />
+      ) : null}
+
+      {dialog === 'inspect' && waiting ? (
+        <InspectDialog
+          request={waiting}
+          onClose={() => setDialog(null)}
+          onSaved={(saved) => {
+            setDialog(null)
+            setHistoryKey((n) => n + 1)
+            load()
+            loadRequests()
+            notify.success(`${saved.asset.asset_code} inspected. Status: ${INSPECTION_OUTCOME_LABELS[saved.inspection_outcome]}.`)
           }}
         />
       ) : null}

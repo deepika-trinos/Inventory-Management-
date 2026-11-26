@@ -1,7 +1,7 @@
-// How maintenance audit rows read in a history (Slice 6.1 / 6.2; owner's answer S13: the history is the
+// How maintenance audit rows read in a history (Slice 6.1 / 6.2 / 6.3; owner's answer S13: the history is the
 // asset's audit rows). Used by the asset page's History and the request page's History.
 import { assetStatusLabel } from '../../api/assets'
-import { maintenanceStatusLabel, priorityLabel } from '../../api/maintenance'
+import { INSPECTION_OUTCOME_LABELS, maintenanceStatusLabel, priorityLabel } from '../../api/maintenance'
 import { formatPlainDate } from '../../utils/dates'
 import { formatAmount } from '../../utils/money'
 
@@ -19,9 +19,10 @@ function shown(field, value) {
   return value
 }
 
-/** "Work started" / "Completed" / "Cancelled" / "Request edited" / "Problem reported", or null if not maintenance. */
+/** "Work started" / "Completed" / "Cancelled" / "Request edited" / "Problem reported" / "Inspected", or null if not maintenance. */
 export function maintenanceActionLabel(entry) {
   if (entry.action === 'maintenance.reported') return 'Problem reported'
+  if (entry.action === 'maintenance.inspected') return 'Inspected' // Slice 6.3
   if (entry.action === 'maintenance.updated') return 'Request edited'
   if (entry.action !== 'maintenance.status_changed') return null
   const to = entry.after?.status
@@ -48,6 +49,17 @@ export function maintenanceHistoryNote(entry) {
       .map((field) => `${FIELD_LABELS[field]}: ${shown(field, before[field])} → ${shown(field, after[field])}`)
       .join('; ')
     return `${after.request_number} · ${changes}`
+  }
+  if (entry.action === 'maintenance.inspected') {
+    // e.g. "MNT-000001 · Under Maintenance → Available · inspected 26 Nov 2026 · Works fine" (Slice 6.3)
+    return [
+      after.request_number,
+      `${assetStatusLabel(before.asset_status)} → ${INSPECTION_OUTCOME_LABELS[after.inspection_outcome] ?? assetStatusLabel(after.asset_status)}`,
+      after.inspection_date ? `inspected ${formatPlainDate(after.inspection_date)}` : null,
+      after.condition_notes,
+    ]
+      .filter(Boolean)
+      .join(' · ')
   }
   if (entry.action !== 'maintenance.status_changed') return null
   // e.g. "MNT-000001 · Reported → In Progress · asset Under Maintenance · started 23 Nov 2026"

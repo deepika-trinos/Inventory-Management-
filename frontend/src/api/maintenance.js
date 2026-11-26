@@ -1,6 +1,7 @@
 // Calls for maintenance requests (Slice 6.1: MNT-01 to MNT-03; owner's answers Q9, Q10, O1-O14).
 // Reporting a problem never changes the asset's status (Q9).
 import apiClient from './client'
+import { todayInCompanyTimezone } from '../utils/dates'
 
 export const ISSUE_MAX = 1000 // O4
 
@@ -110,5 +111,37 @@ export async function cancelRequest(ref, reason) {
 // Priority and details while open: send only what changes; null clears.
 export async function updateRequest(ref, changes) {
   const { data } = await apiClient.patch(`/api/v1/maintenance-requests/${encodeURIComponent(ref)}`, changes)
+  return data
+}
+
+// ---- Slice 6.3: completion inspection (MNT-07, workflow 7.4) -------------------------------------
+export const CONDITION_NOTES_MAX = 1000 // same as the return's condition notes (N4)
+export const INSPECTION_RETIRE_NOTES_MAX = 500 // for Retired the notes are the retirement reason (A3)
+
+// The outcome becomes the asset's status.
+export const INSPECTION_OUTCOME_LABELS = { available: 'Available', damaged: 'Damaged', retired: 'Retired' }
+
+// The list's status filter: the four statuses, plus requests awaiting inspection.
+export const AWAITING_INSPECTION_FILTER = 'awaiting_inspection'
+
+/** "Awaiting inspection", "Inspected: Damaged", or null (nothing to inspect). */
+export function inspectionLabel(request) {
+  if (request.awaiting_inspection) return 'Awaiting inspection'
+  if (request.inspection_outcome) return `Inspected: ${INSPECTION_OUTCOME_LABELS[request.inspection_outcome]}`
+  return null
+}
+
+/** The earliest inspection date: the completion date, or the day the request was cancelled. */
+export function earliestInspectionDate(request) {
+  if (request.completion_date) return request.completion_date
+  return request.cancelled_at ? todayInCompanyTimezone(new Date(request.cancelled_at)) : null
+}
+
+// Record the inspection: { outcome, inspectionDate, notes } -> the request with its history.
+export async function inspectRequest(ref, { outcome, inspectionDate, notes }) {
+  const body = { inspection_outcome: outcome }
+  if (inspectionDate) body.inspection_date = inspectionDate
+  if (notes) body.condition_notes = notes
+  const { data } = await apiClient.post(progressUrl(ref, 'inspect'), body)
   return data
 }

@@ -13,6 +13,10 @@ Slice 6.2 (MNT-04 to MNT-07; owner's answers S1-S14; decisions U2-U6), staff onl
 - POST  /maintenance-requests/{ref}/cancel    : Reported or In Progress -> Cancelled
 - PATCH /maintenance-requests/{ref}           : priority and details while open
 
+Slice 6.3 (MNT-07, workflow 7.4; decisions.md section 35), staff only:
+- POST  /maintenance-requests/{ref}/inspect   : the inspection after the repair (asset Available,
+                                                Damaged or Retired)
+
 Staff = Admin and IT Manager (Q13: no technician role). Reporting never changes the asset's status (Q9).
 """
 
@@ -31,12 +35,13 @@ from app.modules.maintenance import service
 from app.modules.maintenance.schemas import (
     MaintenanceCancel,
     MaintenanceComplete,
+    MaintenanceInspect,
     MaintenanceReport,
     MaintenanceRequestDetail,
     MaintenanceRequestPage,
     MaintenanceRequestRead,
     MaintenanceStart,
-    MaintenanceStatusField,
+    MaintenanceStatusFilter,
     MaintenanceUpdate,
     MyMaintenanceReport,
     MyMaintenanceRequestRead,
@@ -67,7 +72,9 @@ def list_requests(
     search: str | None = Query(
         None, max_length=100, description="Part of the request number, asset ID, asset name or serial number."
     ),
-    status_filter: MaintenanceStatusField | None = Query(None, alias="status", description="Only this status."),
+    status_filter: MaintenanceStatusFilter | None = Query(
+        None, alias="status", description='Only this status, or "awaiting_inspection" (Slice 6.3).'
+    ),
     db: Session = Depends(get_db),
 ) -> dict:
     """Every maintenance request, newest first (O12). Sort by `request_number`, `reported_date`,
@@ -171,6 +178,37 @@ def cancel_request(
     return _detail(db, service.cancel_request(db, actor=user, request=request, reason=body.reason, context=context))
 
 
+@router.post(
+    "/{request_ref}/inspect", response_model=MaintenanceRequestDetail, summary="Inspect the asset after the repair",
+    responses=error_responses(404, 409, 422),
+)
+def inspect_request(
+    body: MaintenanceInspect,
+    request_ref: str = RequestRef,
+    user: User = Depends(require_staff),
+    context: AuditContext = Depends(get_audit_context),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestDetail:
+    """For a request that is Completed, or Cancelled after work started (MNT-07). The outcome becomes the
+    asset's status: **available**, **damaged** or **retired** (permanent; the asset's retirement record
+    and `asset.retired` are written too). Once and final. One transaction with audit `maintenance.inspected`.
+
+    - Not awaiting inspection (Reported, In Progress, cancelled before work started, already inspected):
+      **409** `request_not_awaiting_inspection` (`details.status`)
+    - The asset is not Under Maintenance: **409** `asset_not_under_maintenance`
+    - Outcome missing or not one of the three: **422** `invalid_inspection_outcome`
+    - Notes over 1,000: **422** `invalid_condition_notes`; missing for Damaged or Retired: **422**
+      `condition_notes_required`; over 500 for Retired: **422** `invalid_retire_reason`
+    - Date in the future: **422** `inspection_date_in_future`; before the completion date (or the day it was
+      cancelled): **422** `inspection_date_before_completion` (`details.earliest_date`)"""
+    request = service.get_request(db, request_ref)
+    saved = service.inspect_request(
+        db, actor=user, request=request, inspection_outcome=body.inspection_outcome,
+        inspection_date=body.inspection_date, condition_notes=body.condition_notes, context=context,
+    )
+    return _detail(db, saved)
+
+
 @router.patch(
     "/{request_ref}", response_model=MaintenanceRequestDetail, summary="Edit a request's priority and details",
     responses=error_responses(404, 409, 422),
@@ -221,6 +259,7 @@ def report_problem(
 
     - Retired asset: **409** `asset_retired`
     - The asset already has an open request: **409** `maintenance_request_open` (`details.request_number`)
+    - A request is awaiting inspection: **409** `maintenance_request_awaiting_inspection` (Slice 6.3)
     - Issue missing, blank or over 1,000 characters: **422** `invalid_issue_description`
     - Priority not low / medium / high, or any other field: **422** `validation_error`
     - Reported date in the future: **422** `reported_date_in_future`; before the asset was

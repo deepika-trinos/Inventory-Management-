@@ -261,6 +261,13 @@ def test_completed_and_cancelled_are_final(client, in_progress, close):
 
 def test_after_closing_a_new_request_can_be_reported(client, in_progress):
     cancel(client, in_progress)
+    # Slice 6.3 (revises O2): cancelled during repair, so it awaits inspection first.
+    waiting = report(client, in_progress, "AST-000002", "Still flickers")
+    assert (waiting.status_code, error_code(waiting)) == (409, "maintenance_request_awaiting_inspection")
+    inspected = client.post(
+        f"{REQUESTS}/MNT-000001/inspect", headers=in_progress, json={"inspection_outcome": "available"}
+    )
+    assert inspected.status_code == 200, inspected.text
 
     response = report(client, in_progress, "AST-000002", "Still flickers")
 
@@ -333,6 +340,8 @@ def test_history_shows_each_status_change(client, manager, in_progress):
 
 def test_a_requests_history_leaves_out_other_requests(client, in_progress):
     cancel(client, in_progress)
+    # Slice 6.3: cancelled during repair, so it is inspected before a new request can be reported.
+    client.post(f"{REQUESTS}/MNT-000001/inspect", headers=in_progress, json={"inspection_outcome": "available"})
     report(client, in_progress, "AST-000002", "Another problem")
 
     second = client.get(f"{REQUESTS}/MNT-000002", headers=in_progress).json()

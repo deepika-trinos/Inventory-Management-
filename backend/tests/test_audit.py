@@ -220,6 +220,7 @@ def test_action_list_has_the_agreed_names():
  "maintenance.reported",  # Slice 6.1 (report a problem)
  "maintenance.status_changed",
  "maintenance.updated",  # Slice 6.2 (request details edited)
+        "maintenance.inspected",  # Slice 6.3 (inspection after the repair)
     }
 
 

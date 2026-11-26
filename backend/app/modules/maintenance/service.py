@@ -26,6 +26,18 @@ REPAIR PROGRESS (Slice 6.2: MNT-04 to MNT-07, BR-05; owner's answers S1-S14; dec
 - Priority and details (provider, notes, cost) can be edited while the request is open (S6, S9, S10, S12).
 - Every change: lock the asset row, then the request row; save the change, the asset's status and the
   audit row (maintenance.status_changed / maintenance.updated, on the asset, U6) together.
+
+COMPLETION INSPECTION (Slice 6.3: MNT-07, workflow 7.4; owner's answers in decisions.md section 35)
+- A request that is Completed, or Cancelled after work started, is AWAITING INSPECTION; the asset is
+  still Under Maintenance. A request cancelled before work started never changed the asset: no inspection.
+- Inspect (Admin, IT Manager): outcome Available, Damaged or Retired becomes the asset's status.
+  Inspection date today by default, earlier allowed, not before the completion date (or the day it was
+  cancelled), never in the future. Condition notes up to 1,000: optional for Available, required for
+  Damaged and Retired; for Retired they are the retirement reason, so at most 500 (A3).
+- Retired through inspection: the one way to retire an asset that is Under Maintenance (revises A3).
+  The asset gets the same retirement record (F2) and the same asset.retired audit row as Retire...
+- Once, and final. One transaction: the request, the asset, maintenance.inspected (and asset.retired).
+- While a request awaits inspection, no new request can be reported for the asset (revises O2).
 """
 
 from datetime import date, datetime
@@ -41,7 +53,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.pagination import PageParams, paginate
 from app.modules.assets import service as assets_service
-from app.modules.assets.models import Asset, AssetStatus
+from app.modules.assets.models import RETIRE_REASON_MAX_LENGTH, Asset, AssetStatus
 from app.modules.assignments.models import Assignment
 from app.modules.audit import service as audit
 from app.modules.audit.actions import AuditAction
@@ -50,10 +62,12 @@ from app.modules.employees.models import Employee
 from app.modules.audit.models import AuditLog
 from app.modules.maintenance.models import (
     CANCEL_REASON_MAX_LENGTH,
+    INSPECTION_NOTES_MAX_LENGTH,
     ISSUE_MAX_LENGTH,
     REPAIR_NOTES_MAX_LENGTH,
     REQUEST_NUMBER_PREFIX,
     SERVICE_PROVIDER_MAX_LENGTH,
+    InspectionOutcome,
     MaintenanceRequest,
     MaintenanceStatus,
 )
@@ -78,6 +92,22 @@ def open_request(db: Session, asset_id: int) -> MaintenanceRequest | None:
         select(MaintenanceRequest).where(
             MaintenanceRequest.asset_id == asset_id, MaintenanceRequest.status.in_(MaintenanceStatus.OPEN)
         )
+    )
+
+
+def _awaiting_inspection_clause():
+    """Slice 6.3: work started, Completed or Cancelled, not yet inspected."""
+    return (
+        MaintenanceRequest.status.in_((MaintenanceStatus.COMPLETED, MaintenanceStatus.CANCELLED))
+        & MaintenanceRequest.started_at.is_not(None)
+        & MaintenanceRequest.inspected_at.is_(None)
+    )
+
+
+def awaiting_inspection_request(db: Session, asset_id: int) -> MaintenanceRequest | None:
+    """The asset's request awaiting inspection, if any (Slice 6.3)."""
+    return db.scalar(
+        select(MaintenanceRequest).where(MaintenanceRequest.asset_id == asset_id, _awaiting_inspection_clause())
     )
 
 
@@ -115,13 +145,18 @@ _SORTABLE = {
 }
 
 
+AWAITING_INSPECTION_FILTER = "awaiting_inspection"  # Slice 6.3: a list filter, not a stored status
+
+
 def list_requests(
     db: Session, params: PageParams, *, search: str | None = None, status: str | None = None
 ) -> dict[str, Any]:
     """Every request, newest first, paged (M7, O12). `search` matches part of the request number,
     asset ID, asset name or serial number, ignoring case; `status` filters."""
     stmt = select(MaintenanceRequest).join(Asset, MaintenanceRequest.asset_id == Asset.id)
-    if status:
+    if status == AWAITING_INSPECTION_FILTER:
+        stmt = stmt.where(_awaiting_inspection_clause())
+    elif status:
         stmt = stmt.where(MaintenanceRequest.status == status)
     if search and search.strip():
         term = search.strip().lower()
@@ -176,11 +211,23 @@ def _open_request_error(asset: Asset, request_number: str | None) -> AppError:
     )
 
 
+def _awaiting_inspection_error(asset: Asset, request_number: str) -> AppError:
+    return AppError(
+        409, "maintenance_request_awaiting_inspection",
+        f"{request_number} is awaiting inspection for {asset.asset_code}. Inspect the asset first.",
+        {"request_number": request_number},
+    )
+
+
 def _ensure_no_open_request(db: Session, asset: Asset) -> None:
-    """O2: one open (Reported or In Progress) request per asset."""
+    """O2: one open (Reported or In Progress) request per asset; Slice 6.3: and none while a request
+    awaits inspection."""
     existing = open_request(db, asset.id)
     if existing is not None:
         raise _open_request_error(asset, existing.request_number)
+    waiting = awaiting_inspection_request(db, asset.id)
+    if waiting is not None:
+        raise _awaiting_inspection_error(asset, waiting.request_number)
 
 
 def _not_found() -> AppError:
@@ -265,6 +312,9 @@ def report_problem(
     except IntegrityError as exc:
         db.rollback()
         if OPEN_ASSET_INDEX in str(exc.orig):
+            waiting = awaiting_inspection_request(db, asset.id)
+            if waiting is not None:
+                raise _awaiting_inspection_error(asset, waiting.request_number) from None
             existing = open_request(db, asset.id)
             raise _open_request_error(asset, existing.request_number if existing else None) from None
         raise
@@ -306,6 +356,13 @@ def read(request: MaintenanceRequest) -> dict[str, Any]:
         "cancelled_at": request.cancelled_at,
         "cancelled_by": _user(request.cancelled_by),
         "cancel_reason": request.cancel_reason,
+        # Slice 6.3
+        "awaiting_inspection": request.awaiting_inspection,
+        "inspection_outcome": request.inspection_outcome,
+        "inspection_date": request.inspection_date,
+        "inspection_notes": request.inspection_notes,
+        "inspected_at": request.inspected_at,
+        "inspected_by": _user(request.inspected_by),
     }
 
 
@@ -629,6 +686,139 @@ def update_request(
             db, actor=actor, asset=asset, action=AuditAction.MAINTENANCE_UPDATED,
             before={**_ids(request), **before}, after={**_ids(request), **after}, context=context,
         )
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(request)
+    return request
+
+
+# ---- Completion inspection (Slice 6.3) -----------------------------------------------------------
+_OUTCOME_LABELS = {
+    InspectionOutcome.AVAILABLE: "Available",
+    InspectionOutcome.DAMAGED: "Damaged",
+    InspectionOutcome.RETIRED: "Retired",
+}
+
+
+def _ensure_awaiting_inspection(request: MaintenanceRequest) -> None:
+    if request.awaiting_inspection:
+        return
+    number = request.request_number
+    if request.inspected_at is not None:
+        message = f"{number} has already been inspected. An inspection is final."
+    elif request.status in MaintenanceStatus.OPEN:
+        message = f"{number} is {_STATUS_LABELS[request.status]}. Mark the repair completed first."
+    else:  # Cancelled before work started: the asset was never taken in for repair
+        message = f"{number} was cancelled before work started, so there is nothing to inspect."
+    raise AppError(409, "request_not_awaiting_inspection", message, {"status": request.status})
+
+
+def _inspection_outcome(value: str | None) -> str:
+    if value not in InspectionOutcome.ALL:
+        raise AppError(
+            422, "invalid_inspection_outcome", "Please choose the inspection outcome: Available, Damaged or Retired."
+        )
+    return value
+
+
+def _condition_notes(outcome: str, value: str | None) -> str | None:
+    """Same wording and limit as the return's condition notes (N4, K3); for Retired they are the
+    retirement reason, so at most 500 (A3)."""
+    notes = (value or "").strip() or None
+    if notes is not None and len(notes) > INSPECTION_NOTES_MAX_LENGTH:
+        raise AppError(
+            422, "invalid_condition_notes",
+            f"The condition notes can be at most {INSPECTION_NOTES_MAX_LENGTH:,} characters.",
+        )
+    if notes is None and outcome != InspectionOutcome.AVAILABLE:
+        raise AppError(
+            422, "condition_notes_required",
+            f"Please describe the condition: notes are required when the outcome is {_OUTCOME_LABELS[outcome]}.",
+        )
+    if outcome == InspectionOutcome.RETIRED and len(notes) > RETIRE_REASON_MAX_LENGTH:
+        raise AppError(
+            422, "invalid_retire_reason",
+            f"For Retired the notes are the reason for retiring and can be at most {RETIRE_REASON_MAX_LENGTH} characters.",
+        )
+    return notes
+
+
+def _earliest_inspection_date(request: MaintenanceRequest) -> date:
+    """The completion date; for a request cancelled during repair, the day it was cancelled."""
+    if request.completion_date is not None:
+        return request.completion_date
+    return request.cancelled_at.astimezone(_company_tz()).date()
+
+
+def _inspection_date(request: MaintenanceRequest, value: date | None) -> date:
+    today = _today()
+    on = value or today
+    if on > today:
+        raise AppError(422, "inspection_date_in_future", "The inspection date cannot be in the future.")
+    earliest = _earliest_inspection_date(request)
+    if on < earliest:
+        when = "the repair was completed" if request.completion_date is not None else "the request was cancelled"
+        raise AppError(
+            422, "inspection_date_before_completion",
+            f"The inspection date cannot be before {when} ({earliest.isoformat()}).",
+            {"earliest_date": earliest.isoformat()},
+        )
+    return on
+
+
+def inspect_request(
+    db: Session, *, actor: User, request: MaintenanceRequest, inspection_outcome: str | None,
+    inspection_date: date | None = None, condition_notes: str | None = None,
+    context: AuditContext | None = None,
+) -> MaintenanceRequest:
+    """Record the inspection after a repair (MNT-07, workflow 7.4). The outcome becomes the asset's
+    status: Available (can be assigned again), Damaged, or Retired (permanent; the retirement record
+    and asset.retired are written as for Retire...). Once and final. One transaction.
+
+    Errors: 409 `request_not_awaiting_inspection`, `asset_not_under_maintenance`; 422
+    `invalid_inspection_outcome`, `condition_notes_required`, `invalid_condition_notes`,
+    `invalid_retire_reason`, `inspection_date_in_future`, `inspection_date_before_completion`."""
+    try:
+        asset, request = _lock_both(db, request)
+        _ensure_awaiting_inspection(request)
+        if asset.status != AssetStatus.UNDER_MAINTENANCE:
+            raise AppError(
+                409, "asset_not_under_maintenance",
+                f"{asset.asset_code} is no longer Under Maintenance, so it cannot be inspected here.",
+                {"status": asset.status},
+            )
+        outcome = _inspection_outcome(inspection_outcome)
+        notes = _condition_notes(outcome, condition_notes)
+        on = _inspection_date(request, inspection_date)
+
+        before = {**_ids(request), "status": request.status, "asset_status": asset.status}
+        request.inspection_outcome = outcome
+        request.inspection_date = on
+        request.inspection_notes = notes
+        request.inspected_at = func.now()  # database time, like the audit row
+        request.inspected_by_user_id = actor.id
+        asset.status = outcome  # the outcome values are asset statuses
+        if outcome == InspectionOutcome.RETIRED:
+            asset.retired_by_user_id = actor.id
+            asset.retired_at = func.now()
+            asset.retire_reason = notes
+        after = {
+            **_ids(request), "status": request.status, "asset_status": asset.status,
+            "inspection_outcome": outcome, "inspection_date": on, "condition_notes": notes,
+        }
+        audit.record(
+            db, actor=actor, action=AuditAction.MAINTENANCE_INSPECTED, entity=asset,
+            before=before, after=after, context=context,
+        )
+        if outcome == InspectionOutcome.RETIRED:
+            audit.record(
+                db, actor=actor, action=AuditAction.ASSET_RETIRED, entity=asset,
+                before={"status": AssetStatus.UNDER_MAINTENANCE},
+                after={"status": AssetStatus.RETIRED, "reason": notes, **_ids(request)},
+                context=context,
+            )
+        db.commit()
     except Exception:
         db.rollback()
         raise

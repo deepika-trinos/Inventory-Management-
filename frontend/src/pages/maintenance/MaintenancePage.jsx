@@ -2,13 +2,16 @@
 // Every maintenance request, newest first: number, asset, issue, priority, status, reported date and
 // who reported it (an Employee's own reports included). Search, status filter, paging, sorted on the
 // server. No "new request" button: staff report a problem from the asset page. A row opens the
-// request page (Slice 6.2; in 6.1 it opened the asset page).
+// request page (Slice 6.2; in 6.1 it opened the asset page). Slice 6.3: an "Awaiting inspection" filter,
+// and the status shows "Awaiting inspection" / "Inspected: …" underneath.
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button, MenuItem, Stack, TextField, Typography } from '@mui/material'
 
 import {
   listRequests,
+  AWAITING_INSPECTION_FILTER,
+  inspectionLabel,
   MAINTENANCE_STATUS_LABELS,
   maintenanceStatusLabel,
   priorityLabel,
@@ -21,12 +24,27 @@ import { formatPlainDate } from '../../utils/dates'
 
 const dash = '—'
 
+// The status, with "Awaiting inspection" / "Inspected: …" underneath when there is one (Slice 6.3).
+function RequestStatus({ request }) {
+  const inspection = inspectionLabel(request)
+  return (
+    <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
+      <StatusBadge status={maintenanceStatusLabel(request.status)} />
+      {inspection ? (
+        <Typography variant="caption" color={request.awaiting_inspection ? 'warning.main' : 'text.secondary'}>
+          {inspection}
+        </Typography>
+      ) : null}
+    </Stack>
+  )
+}
+
 const COLUMNS = [
   { field: 'request_number', label: 'Request', sortable: true },
   { field: 'asset_code', label: 'Asset', sortable: true, render: (r) => `${r.asset.asset_code} · ${r.asset.name}` },
   { field: 'issue', label: 'Problem', render: (r) => r.issue_description },
   { field: 'priority', label: 'Priority', sortable: true, render: (r) => (r.priority ? priorityLabel(r.priority) : dash) },
-  { field: 'status', label: 'Status', sortable: true, render: (r) => <StatusBadge status={maintenanceStatusLabel(r.status)} /> },
+  { field: 'status', label: 'Status', sortable: true, render: (r) => <RequestStatus request={r} /> },
   { field: 'reported_date', label: 'Reported on', sortable: true, render: (r) => formatPlainDate(r.reported_date) },
   { field: 'reported_by', label: 'Reported by', render: (r) => reporterLabel(r.reported_by) },
 ]
@@ -55,6 +73,7 @@ export default function MaintenancePage() {
             {label}
           </MenuItem>
         ))}
+        <MenuItem value={AWAITING_INSPECTION_FILTER}>Awaiting inspection</MenuItem>
       </TextField>
       {filtersActive ? (
         <Button size="small" onClick={clearFilters}>

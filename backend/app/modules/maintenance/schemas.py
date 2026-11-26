@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MaintenancePriorityField = Literal["low", "medium", "high"]
 MaintenanceStatusField = Literal["reported", "in_progress", "completed", "cancelled"]
+# The list's status filter also offers "awaiting_inspection" (Slice 6.3); it is not a stored status.
+MaintenanceStatusFilter = Literal["reported", "in_progress", "completed", "cancelled", "awaiting_inspection"]
+InspectionOutcomeField = Literal["available", "damaged", "retired"]
 # S6: INR, 0 or more, 2 decimals, at most 10 digits before the point (as P2 / I3).
 RepairCost = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2, description="INR, 2 decimals, 0 allowed.")]
 
@@ -82,6 +85,15 @@ class MaintenanceRequestRead(BaseModel):
     cancelled_at: datetime | None = None
     cancelled_by: MaintenanceReporter | None = None
     cancel_reason: str | None = None
+    # Slice 6.3: the inspection after the repair.
+    awaiting_inspection: bool = Field(
+        default=False, description="Work started, Completed or Cancelled, and not yet inspected."
+    )
+    inspection_outcome: InspectionOutcomeField | None = None
+    inspection_date: date | None = None
+    inspection_notes: str | None = None
+    inspected_at: datetime | None = None
+    inspected_by: MaintenanceReporter | None = None
 
 
 class MaintenanceHistoryEntry(BaseModel):
@@ -140,6 +152,25 @@ class MaintenanceCancel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str | None = Field(default=None, max_length=5000, description="Required, up to 500.")
+
+
+class MaintenanceInspect(BaseModel):
+    """The inspection after a repair (Slice 6.3, MNT-07). Same field names as the return's inspection (K1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inspection_outcome: str | None = Field(
+        default=None, max_length=50, description='Required: "available", "damaged" or "retired".'
+    )
+    inspection_date: date | None = Field(
+        default=None,
+        description="Today by default; earlier allowed; not in the future; not before the completion date "
+        "(or the day the request was cancelled).",
+    )
+    condition_notes: str | None = Field(
+        default=None, max_length=5000,
+        description="Up to 1,000; required for Damaged and Retired (for Retired they are the reason, up to 500).",
+    )
 
 
 class MaintenanceUpdate(BaseModel):

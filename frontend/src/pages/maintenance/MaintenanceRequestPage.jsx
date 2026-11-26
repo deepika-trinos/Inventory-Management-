@@ -5,14 +5,23 @@
 // Buttons by status: Start work… (Reported; greyed out "Return it first." while the asset is
 // Assigned, S1), Mark completed… (In Progress), Cancel request… (Reported or In Progress) and Edit
 // details (while open). Completed and Cancelled requests are final (S4) and read-only.
+// Slice 6.3 (MNT-07): a request that is Completed, or Cancelled after work started, shows "Awaiting
+// inspection" and an Inspect… button until the inspection is recorded; then an Inspection section.
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
-import { Box, Button, Divider, Link, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
+import { Box, Button, Chip, Divider, Link, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
 
 import { assetPath, assetStatusLabel } from '../../api/assets'
 import { getErrorCode } from '../../api/errors'
-import { getRequest, isOpenStatus, maintenanceStatusLabel, priorityLabel, reporterLabel } from '../../api/maintenance'
+import {
+  getRequest,
+  INSPECTION_OUTCOME_LABELS,
+  isOpenStatus,
+  maintenanceStatusLabel,
+  priorityLabel,
+  reporterLabel,
+} from '../../api/maintenance'
 import EmptyState from '../../components/EmptyState'
 import ErrorMessage from '../../components/ErrorMessage'
 import LoadingState from '../../components/LoadingState'
@@ -21,6 +30,7 @@ import { useNotify } from '../../context/NotificationContext'
 import { formatDateTime, formatPlainDate } from '../../utils/dates'
 import { formatAmount } from '../../utils/money'
 import { maintenanceActionLabel, maintenanceHistoryNote } from './maintenanceHistory'
+import InspectDialog from './InspectDialog'
 import { CancelDialog, CompleteDialog, EditRequestDialog, StartWorkDialog } from './RequestProgressDialogs'
 
 function Detail({ label, value, testId }) {
@@ -63,7 +73,7 @@ export default function MaintenanceRequestPage() {
   const { requestRef } = useParams()
   const [request, setRequest] = useState(null)
   const [error, setError] = useState(null)
-  const [dialog, setDialog] = useState(null) // 'start' | 'complete' | 'cancel' | 'edit'
+  const [dialog, setDialog] = useState(null) // 'start' | 'complete' | 'cancel' | 'edit' | 'inspect'
   const notify = useNotify()
 
   const load = useCallback(() => {
@@ -114,6 +124,9 @@ export default function MaintenanceRequestPage() {
             Request {r.request_number}
           </Typography>
           <StatusBadge status={maintenanceStatusLabel(r.status)} />
+          {r.awaiting_inspection ? (
+            <Chip size="small" color="warning" variant="outlined" label="Awaiting inspection" data-testid="awaiting-inspection" />
+          ) : null}
         </Stack>
         {open ? (
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
@@ -138,6 +151,10 @@ export default function MaintenanceRequestPage() {
               Cancel request…
             </Button>
           </Stack>
+        ) : r.awaiting_inspection ? (
+          <Button variant="contained" onClick={() => setDialog('inspect')}>
+            Inspect…
+          </Button>
         ) : (
           <Typography variant="body2" color="text.secondary">
             {maintenanceStatusLabel(r.status)} requests are final. Read-only.
@@ -186,6 +203,31 @@ export default function MaintenanceRequestPage() {
         </Box>
       </Section>
 
+      {r.awaiting_inspection || r.inspection_outcome ? (
+        <Section title="Inspection">
+          {r.awaiting_inspection ? (
+            <Typography variant="body2" data-testid="inspection-pending">
+              {r.asset.asset_code} stays Under Maintenance until it is inspected. It becomes Available only if it is fit
+              for use.
+            </Typography>
+          ) : (
+            <Box sx={grid}>
+              <Detail label="Outcome" testId="inspection-outcome" value={INSPECTION_OUTCOME_LABELS[r.inspection_outcome]} />
+              <Detail
+                label="Inspected"
+                testId="inspection-by"
+                value={`${formatPlainDate(r.inspection_date)} · ${byWhen(r.inspected_by, r.inspected_at)}`}
+              />
+              <Detail
+                label={r.inspection_outcome === 'retired' ? 'Condition notes (reason for retiring)' : 'Condition notes'}
+                testId="inspection-notes"
+                value={r.inspection_notes}
+              />
+            </Box>
+          )}
+        </Section>
+      ) : null}
+
       <Section title="History">
         <Table size="small" aria-label="Request history">
           <TableHead>
@@ -224,6 +266,15 @@ export default function MaintenanceRequestPage() {
       ) : null}
       {dialog === 'cancel' ? (
         <CancelDialog request={r} onClose={() => setDialog(null)} onSaved={afterSave((s) => `${s.request_number} cancelled.`)} />
+      ) : null}
+      {dialog === 'inspect' ? (
+        <InspectDialog
+          request={r}
+          onClose={() => setDialog(null)}
+          onSaved={afterSave(
+            (s) => `${s.asset.asset_code} inspected. Status: ${INSPECTION_OUTCOME_LABELS[s.inspection_outcome]}.`,
+          )}
+        />
       ) : null}
       {dialog === 'edit' ? (
         <EditRequestDialog request={r} onClose={() => setDialog(null)} onSaved={afterSave((s) => `${s.request_number} saved.`)} />

@@ -25,6 +25,14 @@ migration 0016:
 - Completed: completion_date, completed_at, completed_by_user_id (repair notes required).
 - Cancelled: cancelled_at, cancelled_by_user_id, cancel_reason (up to 500).
 - Completed and Cancelled are final (S4). Check constraints keep each group consistent with the status.
+
+Slice 6.3 (MNT-07, workflow 7.4; owner's answers in decisions.md section 35), migration 0017:
+- Inspection after the repair: inspection_outcome (available / damaged / retired), inspection_date,
+  inspection_notes (up to 1,000), inspected_at, inspected_by_user_id. Only a Completed request, or one
+  Cancelled after work started, is inspected; once, and final.
+- AWAITING INSPECTION = work started, request Completed or Cancelled, not yet inspected. Such a request
+  still blocks a new one for the asset: the partial unique index now covers Reported, In Progress and
+  awaiting inspection (revises O2).
 """
 
 from datetime import date, datetime
@@ -41,6 +49,7 @@ ISSUE_MAX_LENGTH = 1000  # O4
 SERVICE_PROVIDER_MAX_LENGTH = 200  # S9
 REPAIR_NOTES_MAX_LENGTH = 1000  # S12
 CANCEL_REASON_MAX_LENGTH = 500  # S11
+INSPECTION_NOTES_MAX_LENGTH = 1000  # Slice 6.3: same as the return's condition notes (N4)
 
 # Slice 6.2 check constraints (migration 0016), in one place for the model and the migration.
 STARTED_TOGETHER = (
@@ -63,6 +72,27 @@ CANCELLED_MATCHES_STATUS = (
     " AND cancel_reason IS NOT NULL)"
     " OR (status <> 'cancelled' AND cancelled_at IS NULL AND cancelled_by_user_id IS NULL AND cancel_reason IS NULL)"
 )
+# Slice 6.3 check constraints (migration 0017).
+INSPECTED_TOGETHER = (
+    "(inspection_outcome IS NULL AND inspection_date IS NULL AND inspected_at IS NULL"
+    " AND inspected_by_user_id IS NULL AND inspection_notes IS NULL)"
+    " OR (inspection_outcome IS NOT NULL AND inspection_date IS NOT NULL AND inspected_at IS NOT NULL"
+    " AND inspected_by_user_id IS NOT NULL)"
+)
+INSPECTED_MATCHES_STATUS = (
+    "inspected_at IS NULL OR (status IN ('completed', 'cancelled') AND started_at IS NOT NULL)"
+)
+INSPECTION_OUTCOME_VALID = (
+    "inspection_outcome IS NULL OR inspection_outcome IN ('available', 'damaged', 'retired')"
+)
+INSPECTION_NOTES_REQUIRED = (
+    "inspection_outcome IS NULL OR inspection_outcome = 'available' OR inspection_notes IS NOT NULL"
+)
+INSPECTION_NOT_BEFORE_COMPLETION = (
+    "inspection_date IS NULL OR completion_date IS NULL OR inspection_date >= completion_date"
+)
+# The partial unique index's condition: Reported, In Progress, or awaiting inspection (migration 0017).
+BLOCKING_WHERE = "status = 'reported' OR (started_at IS NOT NULL AND inspected_at IS NULL)"
 REQUEST_NUMBER_PREFIX = "MNT-"
 
 
@@ -88,6 +118,16 @@ class MaintenancePriority:
     ALL = (LOW, MEDIUM, HIGH)
 
 
+class InspectionOutcome:
+    """Slice 6.3: the result of the inspection after a repair. It becomes the asset's status."""
+
+    AVAILABLE = "available"
+    DAMAGED = "damaged"
+    RETIRED = "retired"
+
+    ALL = (AVAILABLE, DAMAGED, RETIRED)
+
+
 # The sequence behind MNT-000001, MNT-000002, ... (migration 0015). Owned by
 # maintenance_requests.request_number, so it is dropped with the table.
 maintenance_request_number_seq = Sequence("maintenance_request_number_seq", metadata=Base.metadata)
@@ -111,6 +151,12 @@ class MaintenanceRequest(TimestampMixin, Base):
         CheckConstraint(
             "completion_date IS NULL OR completion_date >= started_date", name="completion_not_before_start"
         ),
+        # Slice 6.3 (migration 0017)
+        CheckConstraint(INSPECTED_TOGETHER, name="inspected_together"),
+        CheckConstraint(INSPECTED_MATCHES_STATUS, name="inspected_matches_status"),
+        CheckConstraint(INSPECTION_OUTCOME_VALID, name="inspection_outcome_valid"),
+        CheckConstraint(INSPECTION_NOTES_REQUIRED, name="inspection_notes_required"),
+        CheckConstraint(INSPECTION_NOT_BEFORE_COMPLETION, name="inspection_not_before_completion"),
     )
     # Read the database-made request_number back right after the INSERT.
     __mapper_args__ = {"eager_defaults": True}
@@ -146,25 +192,42 @@ class MaintenanceRequest(TimestampMixin, Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     cancel_reason: Mapped[str | None] = mapped_column(String(CANCEL_REASON_MAX_LENGTH))
+    # Slice 6.3: the inspection after the repair.
+    inspection_outcome: Mapped[str | None] = mapped_column(String(20))
+    inspection_date: Mapped[date | None] = mapped_column(Date)
+    inspection_notes: Mapped[str | None] = mapped_column(String(INSPECTION_NOTES_MAX_LENGTH))
+    inspected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    inspected_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
     asset: Mapped[Asset] = relationship(lazy="joined")
     reported_by: Mapped[User] = relationship(lazy="joined", foreign_keys=[reported_by_user_id])
     started_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[started_by_user_id])
     completed_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[completed_by_user_id])
     cancelled_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[cancelled_by_user_id])
+    inspected_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[inspected_by_user_id])
 
     @property
     def is_open(self) -> bool:
         return self.status in MaintenanceStatus.OPEN
 
+    @property
+    def awaiting_inspection(self) -> bool:
+        """Slice 6.3: work started, the request is Completed or Cancelled, and it is not yet inspected."""
+        return (
+            self.status in (MaintenanceStatus.COMPLETED, MaintenanceStatus.CANCELLED)
+            and self.started_at is not None
+            and self.inspected_at is None
+        )
+
     def __repr__(self) -> str:
         return f"<MaintenanceRequest {self.request_number} {self.status}>"
 
 
-# At most ONE open (Reported or In Progress) request per asset (O2). Migration 0015.
+# At most ONE request per asset that is Reported, In Progress or awaiting inspection (O2, widened by
+# Slice 6.3 in migration 0017; created in migration 0015).
 Index(
     "uq_maintenance_requests_open_asset",
     MaintenanceRequest.asset_id,
     unique=True,
-    postgresql_where=text("status IN ('reported', 'in_progress')"),
+    postgresql_where=text(BLOCKING_WHERE),
 )

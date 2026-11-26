@@ -139,6 +139,7 @@ const HISTORY_ACTION_LABELS = {
   'maintenance.reported': 'Problem reported', // Slice 6.1
   'maintenance.status_changed': 'Repair status changed', // Slice 6.2 (shown more precisely by historyNote)
   'maintenance.updated': 'Request edited', // Slice 6.2
+  'maintenance.inspected': 'Inspected', // Slice 6.3
 }
 
 export function historyActionLabel(action) {
