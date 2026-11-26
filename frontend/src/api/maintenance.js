@@ -1,7 +1,7 @@
 // Calls for maintenance requests (Slice 6.1: MNT-01 to MNT-03; owner's answers Q9, Q10, O1-O14).
 // Reporting a problem never changes the asset's status (Q9).
 import apiClient from './client'
-import { todayInCompanyTimezone } from '../utils/dates'
+import { formatPlainDate, todayInCompanyTimezone } from '../utils/dates'
 
 export const ISSUE_MAX = 1000 // O4
 
@@ -144,4 +144,24 @@ export async function inspectRequest(ref, { outcome, inspectionDate, notes }) {
   if (notes) body.condition_notes = notes
   const { data } = await apiClient.post(progressUrl(ref, 'inspect'), body)
   return data
+}
+
+// ---- Slice 6.4: employee self-service (MNT-08) ---------------------------------------------------
+// Employee role: the requests I reported, newest first. Only Employee-safe fields: number, asset (ID,
+// name, serial), problem, status, reported / started / completed / cancelled dates and cancel reason.
+export async function getMyRequests() {
+  const { data } = await apiClient.get('/api/v1/me/maintenance-requests')
+  return data
+}
+
+/** "Work started 26 Nov 2026 · Completed 27 Nov 2026", "Cancelled 26 Nov 2026 — Reason: …", or "Waiting for IT". */
+export function myRequestProgress(request) {
+  const parts = []
+  if (request.started_date) parts.push(`Work started ${formatPlainDate(request.started_date)}`)
+  if (request.completion_date) parts.push(`Completed ${formatPlainDate(request.completion_date)}`)
+  if (request.status === 'cancelled') {
+    const when = request.cancelled_date ? ` ${formatPlainDate(request.cancelled_date)}` : ''
+    parts.push(`Cancelled${when}${request.cancel_reason ? ` — Reason: ${request.cancel_reason}` : ''}`)
+  }
+  return parts.length ? parts.join(' · ') : 'Waiting for the IT team'
 }

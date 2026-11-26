@@ -38,6 +38,13 @@ COMPLETION INSPECTION (Slice 6.3: MNT-07, workflow 7.4; owner's answers in decis
   The asset gets the same retirement record (F2) and the same asset.retired audit row as Retire...
 - Once, and final. One transaction: the request, the asset, maintenance.inspected (and asset.retired).
 - While a request awaits inspection, no new request can be reported for the asset (revises O2).
+
+EMPLOYEE SELF-SERVICE (Slice 6.4: MNT-08, PRD 4.1 / 4.2; owner's answers in decisions.md section 37)
+- My Requests = the requests the logged-in user REPORTED (MNT-08 "own submitted"; O9), newest first,
+  also after the asset was returned (O6). Staff-created requests on their asset are not included.
+- Only the Employee-safe fields leave the server (`my_read`): number, asset (ID, name, serial), problem,
+  request status, reported / work started / completed / cancelled dates and the cancel reason. Never
+  priority, service provider, repair notes, cost, staff e-mails or inspection details (N12, O8).
 """
 
 from datetime import date, datetime
@@ -824,3 +831,31 @@ def inspect_request(
         raise
     db.refresh(request)
     return request
+
+
+# ---- Employee self-service (Slice 6.4) -------------------------------------------------------------
+def my_requests(db: Session, user: User) -> list[MaintenanceRequest]:
+    """The requests this login reported, newest first (MNT-08). Not paged: one person's requests stay few."""
+    stmt = (
+        select(MaintenanceRequest)
+        .where(MaintenanceRequest.reported_by_user_id == user.id)
+        .order_by(MaintenanceRequest.id.desc())
+    )
+    return list(db.scalars(stmt).unique())
+
+
+def my_read(request: MaintenanceRequest) -> dict[str, Any]:
+    """One request as its Employee reporter may see it: no staff-only fields (Slice 6.4)."""
+    asset = request.asset
+    cancelled_on = request.cancelled_at.astimezone(_company_tz()).date() if request.cancelled_at else None
+    return {
+        "request_number": request.request_number,
+        "asset": {"asset_code": asset.asset_code, "name": asset.name, "serial_number": asset.serial_number},
+        "issue_description": request.issue_description,
+        "status": request.status,
+        "reported_date": request.reported_date,
+        "started_date": request.started_date,
+        "completion_date": request.completion_date,
+        "cancelled_date": cancelled_on,
+        "cancel_reason": request.cancel_reason,
+    }

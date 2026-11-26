@@ -205,6 +205,29 @@ class MyMaintenanceRequestRead(BaseModel):
     reported_date: date
 
 
+class MyRequestAsset(BaseModel):
+    """The asset as an Employee sees it on My Requests: no status, no id (Slice 6.4)."""
+
+    asset_code: str
+    name: str
+    serial_number: str
+
+
+class MyRequestRow(BaseModel):
+    """One of my requests (Slice 6.4, MNT-08). Only Employee-safe fields: no priority, service provider,
+    repair notes, cost, staff e-mails or inspection details (N12, O8)."""
+
+    request_number: str
+    asset: MyRequestAsset
+    issue_description: str
+    status: MaintenanceStatusField
+    reported_date: date
+    started_date: date | None = Field(default=None, description="When work started.")
+    completion_date: date | None = Field(default=None, description="When the repair was completed.")
+    cancelled_date: date | None = Field(default=None, description="The day it was cancelled (company timezone).")
+    cancel_reason: str | None = None
+
+
 class OpenRequestSummary(BaseModel):
     """The asset's open request, as shown on a My Assets row (M7)."""
 

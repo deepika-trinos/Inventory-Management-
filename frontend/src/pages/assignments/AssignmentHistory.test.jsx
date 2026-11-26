@@ -163,8 +163,8 @@ describe('My Assets (N8, N11-N13)', () => {
     expect(await screen.findByText('You hold no assets right now.')).toBeTruthy()
   })
 
-  it('Employees land on My Assets after login; staff still land on the dashboard (N11)', () => {
-    expect(homePathFor('Employee')).toBe('/my/assets')
+  it('Employees land on My Dashboard after login (Slice 6.4, N11); staff still land on the dashboard', () => {
+    expect(homePathFor('Employee')).toBe('/my/dashboard')
     expect(homePathFor('IT Manager')).toBe('/dashboard')
     expect(homePathFor('Admin')).toBe('/dashboard')
   })

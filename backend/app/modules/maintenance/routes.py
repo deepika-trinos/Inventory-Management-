@@ -17,6 +17,9 @@ Slice 6.3 (MNT-07, workflow 7.4; decisions.md section 35), staff only:
 - POST  /maintenance-requests/{ref}/inspect   : the inspection after the repair (asset Available,
                                                 Damaged or Retired)
 
+Slice 6.4 (MNT-08; decisions.md section 37), Employee only:
+- GET   /me/maintenance-requests             : the requests I reported, newest first (Employee-safe fields)
+
 Staff = Admin and IT Manager (Q13: no technician role). Reporting never changes the asset's status (Q9).
 """
 
@@ -45,6 +48,7 @@ from app.modules.maintenance.schemas import (
     MaintenanceUpdate,
     MyMaintenanceReport,
     MyMaintenanceRequestRead,
+    MyRequestRow,
 )
 from app.modules.users.models import RoleName, User
 
@@ -298,3 +302,15 @@ def report_my_problem(
     )
     data = service.read(request)
     return {key: data[key] for key in ("request_number", "asset", "issue_description", "status", "reported_date")}
+
+
+@me_router.get(
+    "/maintenance-requests", response_model=list[MyRequestRow], summary="My maintenance requests",
+)
+def my_requests(user: User = Depends(require_employee), db: Session = Depends(get_db)) -> list[dict]:
+    """The requests **you reported**, newest first, including those for assets you have since returned
+    (MNT-08, O6). Requests staff created are not included. Only the number, asset, problem, status and the
+    reported / work started / completed / cancelled dates and the cancel reason are returned; never the
+    priority, service provider, repair notes, cost, staff e-mails or inspection details.
+    Admin and IT Manager: **403** (they use `/maintenance-requests`)."""
+    return [service.my_read(r) for r in service.my_requests(db, user)]

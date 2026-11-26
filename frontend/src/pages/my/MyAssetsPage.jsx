@@ -1,12 +1,12 @@
 // My Assets: /my/assets (Employee role only, Slice 5.3: EMP-04; owner's answers N8, N11-N13).
 // The logged-in employee's own current assets (overdue items flagged, N7) and past assignments,
 // read-only. Shows asset, dates, expected return, return date and inspection outcome; not the
-// condition notes or the staff who assigned or returned it (N12). Employees land here after
-// login until Slice 6.4 builds My Dashboard (N11).
+// condition notes or the staff who assigned or returned it (N12). Employees landed here after
+// login until Slice 6.4 built My Dashboard (N11); they now land on My Dashboard.
 // Slice 6.1 (MNT-01; owner's answers O3, O6, O12): each CURRENT asset has "Report a problem"
 // (issue only); after reporting, "Problem reported: MNT-000001. The IT team will review it." and
 // the row shows "Problem reported (MNT-…)" instead of the button while that request is open.
-// Past assets have no button (O6). The full My Requests page is Slice 6.4.
+// Past assets have no button (O6). The full My Requests page is /my/requests (Slice 6.4).
 import { useCallback, useEffect, useState } from 'react'
 import BuildOutlined from '@mui/icons-material/BuildOutlined'
 import { Button, Chip, Stack, Typography } from '@mui/material'

@@ -58,8 +58,8 @@ export function canOpen(role, path) {
   return Boolean(page && page.roles.includes(role))
 }
 
-// Where each role lands after logging in. Employees land on My Assets until Slice 6.4 builds
-// My Dashboard (owner's answer N11).
+// Where each role lands after logging in. Employees land on My Dashboard (Slice 6.4; owner's answer
+// N11: My Assets until then).
 export function homePathFor(role) {
-  return role === ROLES.EMPLOYEE ? '/my/assets' : '/dashboard'
+  return role === ROLES.EMPLOYEE ? '/my/dashboard' : '/dashboard'
 }

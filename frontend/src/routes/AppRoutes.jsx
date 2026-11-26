@@ -24,6 +24,8 @@ import InventoryPage from '../pages/inventory/InventoryPage'
 import MaintenancePage from '../pages/maintenance/MaintenancePage'
 import MaintenanceRequestPage from '../pages/maintenance/MaintenanceRequestPage'
 import MyAssetsPage from '../pages/my/MyAssetsPage'
+import MyDashboardPage from '../pages/my/MyDashboardPage'
+import MyRequestsPage from '../pages/my/MyRequestsPage'
 import StockItemDetailPage from '../pages/inventory/StockItemDetailPage'
 import PurchaseDetailPage from '../pages/purchases/PurchaseDetailPage'
 import PurchasesPage from '../pages/purchases/PurchasesPage'
@@ -48,6 +50,8 @@ const BUILT_PAGES = {
   '/inventory': InventoryPage,
   '/maintenance': MaintenancePage, // Slice 6.1: maintenance requests (O12)
   '/my/assets': MyAssetsPage, // Slice 5.3 (N8, N15)
+  '/my/dashboard': MyDashboardPage, // Slice 6.4 (N11: the Employee home page)
+  '/my/requests': MyRequestsPage, // Slice 6.4 (MNT-08)
   '/purchases': PurchasesPage,
   '/users': UsersPage,
   '/vendors': VendorsPage,
